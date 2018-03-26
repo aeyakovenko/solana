@@ -131,7 +131,7 @@ impl Default for Response {
 
 #[derive(Debug)]
 pub struct Responses {
-    pub responses: Vec<Response>,
+    pub responses: Vec<Arc<RwLock<Response>>>,
 }
 
 impl Default for Responses {
@@ -143,13 +143,52 @@ impl Default for Responses {
 }
 
 pub type SharedPackets = Arc<RwLock<Packets>>;
-pub type PacketRecycler = Arc<Mutex<Vec<SharedPackets>>>;
+pub type SharedResponse = Arc<RwLock<Response>>;
 pub type Receiver = mpsc::Receiver<SharedPackets>;
 pub type Sender = mpsc::Sender<SharedPackets>;
-pub type SharedResponses = Arc<RwLock<Responses>>;
-pub type ResponseRecycler = Arc<Mutex<Vec<SharedResponses>>>;
+pub type SharedResponses = Vec<SharedReponse>;
 pub type ResponseSender = mpsc::Sender<SharedResponses>;
 pub type ResponseReceiver = mpsc::Receiver<SharedResponses>;
+
+#[derive(Clone)]
+struct PacketRecycler {
+    gc: Arc<Mutex<Vec<SharedPackets>>>
+}
+
+impl PacketRecycler {
+    pub fn new() ::  {
+        return Arc::new(Mutex::new(PacketRecycler{gc:vec![]}));
+    }
+    pub fn allocate(&self) -> SharedPackets {
+        let mut gc = self.gc.lock().expect("lock");
+        gc.pop()
+            .unwrap_or_else(|| Arc::new(RwLock::new(Default::default())))
+    }
+    pub fn recycle(&self, msgs: SharedPackets) {
+        let mut gc = recycler.lock().expect("lock");
+        gc.push(msgs);
+    }
+}
+
+#[derive(Clone)]
+struct ResponseRecycler {
+    gc: Arc<Mutex<Vec<SharedResponse>>>
+}
+
+impl ResponseRecycler {
+    pub fn new() ::  {
+        return Arc::new(Mutex::new(ResponseRecycler{gc:vec![]}));
+    }
+    pub fn allocate(&self) -> SharedResponse {
+        let mut gc = self.gc.lock().expect("lock");
+        gc.pop()
+            .unwrap_or_else(|| Arc::new(RwLock::new(Default::default())))
+    }
+    pub fn recycle(&self, msgs: SharedResponse) {
+        let mut gc = recycler.lock().expect("lock");
+        gc.push(msgs);
+    }
+}
 
 impl Packets {
     fn run_read_from(&mut self, socket: &UdpSocket) -> Result<usize> {
@@ -196,23 +235,6 @@ impl Responses {
         }
         Ok(())
     }
-}
-
-pub fn allocate<T>(recycler: &Arc<Mutex<Vec<Arc<RwLock<T>>>>>) -> Arc<RwLock<T>>
-where
-    T: Default,
-{
-    let mut gc = recycler.lock().expect("lock");
-    gc.pop()
-        .unwrap_or_else(|| Arc::new(RwLock::new(Default::default())))
-}
-
-pub fn recycle<T>(recycler: &Arc<Mutex<Vec<Arc<RwLock<T>>>>>, msgs: Arc<RwLock<T>>)
-where
-    T: Default,
-{
-    let mut gc = recycler.lock().expect("lock");
-    gc.push(msgs);
 }
 
 fn recv_loop(
