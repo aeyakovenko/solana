@@ -151,44 +151,27 @@ pub type ResponseSender = mpsc::Sender<SharedResponses>;
 pub type ResponseReceiver = mpsc::Receiver<SharedResponses>;
 
 #[derive(Clone)]
-struct PacketRecycler {
-    gc: Arc<Mutex<Vec<SharedPackets>>>
+struct Recycler<T: Default> {
+    gc: Arc<Mutex<Vec<Arc<RwLock<T>>>>
 }
 
-impl PacketRecycler {
+impl<T: Default> Recycler<T> {
     pub fn new() ::  {
-        return Arc::new(Mutex::new(PacketRecycler{gc:vec![]}));
+        return Arc::new(Mutex::new(Recycler{gc:vec![]}));
     }
-    pub fn allocate(&self) -> SharedPackets {
+    pub fn allocate(&self) -> Arc<RwLock<T> {
         let mut gc = self.gc.lock().expect("lock");
         gc.pop()
             .unwrap_or_else(|| Arc::new(RwLock::new(Default::default())))
     }
-    pub fn recycle(&self, msgs: SharedPackets) {
+    pub fn recycle(&self, msgs: Arc<RwLock<T>) {
         let mut gc = recycler.lock().expect("lock");
         gc.push(msgs);
     }
 }
 
-#[derive(Clone)]
-struct ResponseRecycler {
-    gc: Arc<Mutex<Vec<SharedResponse>>>
-}
-
-impl ResponseRecycler {
-    pub fn new() ::  {
-        return Arc::new(Mutex::new(ResponseRecycler{gc:vec![]}));
-    }
-    pub fn allocate(&self) -> SharedResponse {
-        let mut gc = self.gc.lock().expect("lock");
-        gc.pop()
-            .unwrap_or_else(|| Arc::new(RwLock::new(Default::default())))
-    }
-    pub fn recycle(&self, msgs: SharedResponse) {
-        let mut gc = recycler.lock().expect("lock");
-        gc.push(msgs);
-    }
-}
+type PacketRecycler = Recylcer<Packets>
+type ResponseRecycler = Recylcer<Response> 
 
 impl Packets {
     fn run_read_from(&mut self, socket: &UdpSocket) -> Result<usize> {
