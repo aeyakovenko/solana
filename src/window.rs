@@ -97,64 +97,6 @@ impl Block {
     }
 }
 
-//TODO, we would need to stick block authentication before we create the
-//window.
-fn reader(
-    window: &Window,
-    recycler: &Recycler,
-    consumed: &mut usize,
-    socket: &UdpSocket,
-    s: &Sender,
-) -> Result<()> {
-    socket.set_nonblocking(false)?;
-    for i in 0.. {
-        let b = allocate(recycler);
-        let b_ = b.clone();
-        let mut p = b.write().unwrap();
-        match socket.recv_from(&mut p.data) {
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                recycle(recycler, b_);
-                break;
-            }
-            Err(e) => {
-                recycle(recycler, b_);
-                return Err(Error::IO(e));
-            }
-            Ok((nrecv, from)) => {
-                p.size = nrecv;
-                p.set_addr(&from);
-                if i == 0 {
-                    socket.set_nonblocking(true)?;
-                }
-                let pix = p.index()? as usize;
-                let w = pix % NUM_BLOCKS;
-                //TODO, after the block are authenticated
-                //if we get different blocks at the same index
-                //that is a network failure/attack
-                {
-                    let mut mw = window.lock().unwrap();
-                    if mw[w].is_none() {
-                        mw[w] = Some(b_);
-                    }
-                    //send a contiguous set of blocks
-                    loop {
-                        let k = *consumed % NUM_BLOCKS;
-                        match mw[k].clone() {
-                            None => break,
-                            Some(x) => {
-                                s.send(x)?;
-                                mw[k] = None;
-                            }
-                        }
-                        *consumed += 1;
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 pub fn service(exit: Arc<AtomicBool>, r: Recycler, s: Sender, sock: UdpSocket) -> JoinHandle<()> {
     spawn(move || {
         let window = Arc::new(Mutex::new(Vec::new()));
