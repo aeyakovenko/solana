@@ -131,24 +131,16 @@ impl Default for Response {
 
 #[derive(Debug)]
 pub struct Responses {
-    pub responses: Vec<Arc<RwLock<Response>>>,
-}
-
-impl Default for Responses {
-    fn default() -> Responses {
-        Responses {
-            responses: vec![Response::default(); NUM_RESP],
-        }
-    }
 }
 
 pub type SharedPackets = Arc<RwLock<Packets>>;
 pub type SharedResponse = Arc<RwLock<Response>>;
 pub type Receiver = mpsc::Receiver<SharedPackets>;
 pub type Sender = mpsc::Sender<SharedPackets>;
-pub type SharedResponses = Vec<SharedReponse>;
-pub type ResponseSender = mpsc::Sender<SharedResponses>;
-pub type ResponseReceiver = mpsc::Receiver<SharedResponses>;
+pub type ResponseSender = mpsc::Sender<VecDequeue<SharedResponse>>;
+pub type ResponseReceiver = mpsc::Receiver<VecDequeue<SharedResponse>>;
+pub type PacketRecycler = Recycler<Packets>
+pub type ResponseRecycler = Recycler<Response>
 
 #[derive(Clone)]
 struct Recycler<T: Default> {
@@ -209,12 +201,42 @@ impl Packets {
 }
 
 impl Responses {
-    fn send_to(&self, socket: &UdpSocket, num: &mut usize) -> Result<()> {
-        for p in &self.responses {
-            let a = p.meta.get_addr();
-            socket.send_to(&p.data[..p.meta.size], &a)?;
-            //TODO(anatoly): wtf do we do about errors?
-            *num += 1;
+    fn read_from(re: ResponseRecycler, socket: &UdpSocket) -> Result<VecDequeue<SharedResponse>> {
+        let mut v = VecDequeue::new();
+        socket.set_nonblocking(false)?;
+        for _i in 0 .. NUM_RESP {
+            let r = re.allocate();
+            {
+                match socket.recv_from(&mut p.data) {
+                    Err(_) if i > 0 => {
+                        trace!("got {:?} messages", i);
+                        break;
+                    }
+                    Err(e) => {
+                        info!("recv_from err {:?}", e);
+                        return Err(Error::IO(e));
+                    }
+                    Ok((nrecv, from)) => {
+                        p.meta.size = nrecv;
+                        p.meta.set_addr(&from);
+                        if i == 0 {
+                            socket.set_nonblocking(true)?;
+                        }
+                    }
+                }
+            }
+            v.push_back(r);
+        }
+        Ok(v)
+    }
+    fn send_to(re: ResponesRecycler, socket: &UdpSocket, v: &mut VecDequeue<SharedResponse>) -> Result<()> {
+        while Some(r) = v.pop_front() {
+            {
+                let p = r.read().unwrap();
+                let a = p.meta.get_addr();
+                socket.send_to(&p.data[..p.meta.size], &a)?;
+            }
+            re.recycle(r);
         }
         Ok(())
     }
