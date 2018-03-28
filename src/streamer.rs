@@ -76,7 +76,7 @@ pub fn responder(
 //TODO, we would need to stick block authentication before we create the
 //window.
 fn recv_window(
-    window: &mut Vec<SharedBlob>,
+    window: &mut Vec<Option<SharedBlob>>,
     recycler: &BlobRecycler,
     consumed: &mut usize,
     socket: &UdpSocket,
@@ -91,9 +91,8 @@ fn recv_window(
         //if we get different blocks at the same index
         //that is a network failure/attack
         {
-            let mut mw = window.lock().unwrap();
-            if mw[w].is_none() {
-                mw[w] = Some(b);
+            if window[w].is_none() {
+                window[w] = Some(b);
             } else {
                 debug!("duplicate blob at index {:}", w);
             }
@@ -101,11 +100,11 @@ fn recv_window(
             let mut dq = VecDeque::new();
             loop {
                 let k = *consumed % NUM_BLOBS;
-                match mw[k].clone() {
+                match window[k].clone() {
                     None => break,
                     Some(x) => {
                         dq.push_front(x);
-                        mw[k] = None;
+                        window[k] = None;
                     }
                 }
                 *consumed += 1;
@@ -125,12 +124,12 @@ pub fn window(
     s: BlobSender,
 ) -> JoinHandle<()> {
     spawn(move || {
-        let window = Vec::new();
+        let mut window = vec![None; NUM_BLOBS];
         let mut consumed = 0;
         let timer = Duration::new(1, 0);
-        sock.set_read_timeout(Some(timer))?;
+        sock.set_read_timeout(Some(timer)).unwrap();
         loop {
-            if recv_window(&window, &r, &mut consumed, &sock, &s).is_err()
+            if recv_window(&mut window, &r, &mut consumed, &sock, &s).is_err()
                 && exit.load(Ordering::Relaxed)
             {
                 break;
@@ -278,10 +277,10 @@ mod test {
         let addr = read.local_addr().unwrap();
         let send = UdpSocket::bind("127.0.0.1:0").expect("bind");
         let exit = Arc::new(AtomicBool::new(false));
-        let packet_recycler = PacketRecycler::new();
+        let pack_re = PacketRecycler::new();
         let resp_re = BlobRecycler::new();
         let (s_reader, r_reader) = channel();
-        let t_receiver = receiver(read, exit.clone(), packet_recycler.clone(), s_reader).unwrap();
+        let t_receiver = receiver(read, exit.clone(), pack_re.clone(), s_reader).unwrap();
         let (s_responder, r_responder) = channel();
         let t_responder = responder(send, exit.clone(), resp_re.clone(), r_responder);
         let mut msgs = VecDeque::new();

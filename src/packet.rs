@@ -1,5 +1,7 @@
 use std::sync::{Arc, Mutex, RwLock};
 use std::fmt;
+use std::io;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::collections::VecDeque;
 use result::{Error, Result};
@@ -196,7 +198,23 @@ impl Packets {
 }
 
 impl Blob {
-    pub fn index(&self) -> Result<usize> {}
+    pub fn index(&self) -> Result<u64> {
+        let mut rdr = io::Cursor::new(&self.data[0..8]);
+        let r = rdr.read_u64::<LittleEndian>()?;
+        Ok(r)
+    }
+    pub fn set_index(&mut self, ix: u64) -> Result<()> {
+        let mut wtr = vec![];
+        wtr.write_u64::<LittleEndian>(ix)?;
+        self.data[..8].clone_from_slice(&wtr);
+        Ok(())
+    }
+    pub fn data(&self) -> &[u8] {
+        &self.data[8..]
+    }
+    pub fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.data[8..]
+    }
     pub fn recv_from(re: &BlobRecycler, socket: &UdpSocket) -> Result<VecDeque<SharedBlob>> {
         let mut v = VecDeque::new();
         socket.set_nonblocking(false)?;
