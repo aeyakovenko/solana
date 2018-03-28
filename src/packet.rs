@@ -289,6 +289,7 @@ mod test {
         let reader = UdpSocket::bind("127.0.0.1:0").expect("bind");
         let addr = reader.local_addr().unwrap();
         let sender = UdpSocket::bind("127.0.0.1:0").expect("bind");
+        let saddr = sender.local_addr().unwrap();
         let r = PacketRecycler::new();
         let p = r.allocate();
         p.write().unwrap().packets.resize(10, Packet::default());
@@ -300,7 +301,7 @@ mod test {
         p.write().unwrap().recv_from(&reader).unwrap();
         for m in p.write().unwrap().packets.iter_mut() {
             assert_eq!(m.meta.size, 256);
-            assert_eq!(m.meta.get_addr(), addr);
+            assert_eq!(m.meta.get_addr(), saddr);
         }
 
         r.recycle(p);
