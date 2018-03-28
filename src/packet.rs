@@ -318,8 +318,13 @@ mod test {
         p.write().unwrap().meta.size = 1024;
         let mut v = VecDeque::new();
         v.push_back(p);
+        assert_eq!(v.len(), 1);
         Blob::send_to(&r, &sender, &mut v).unwrap();
+        trace!("send_to");
+        assert_eq!(v.len(), 0);
         let mut rv = Blob::recv_from(&r, &sender).unwrap();
+        trace!("recv_from");
+        assert_eq!(rv.len(), 1);
         let rp = rv.pop_front().unwrap();
         assert_eq!(rp.write().unwrap().meta.size, 1024);
         r.recycle(rp);
