@@ -309,6 +309,7 @@ mod test {
 
     #[test]
     pub fn blob_send_recv() {
+        trace!("start");
         let reader = UdpSocket::bind("127.0.0.1:0").expect("bind");
         let addr = reader.local_addr().unwrap();
         let sender = UdpSocket::bind("127.0.0.1:0").expect("bind");
@@ -322,7 +323,7 @@ mod test {
         Blob::send_to(&r, &sender, &mut v).unwrap();
         trace!("send_to");
         assert_eq!(v.len(), 0);
-        let mut rv = Blob::recv_from(&r, &sender).unwrap();
+        let mut rv = Blob::recv_from(&r, &reader).unwrap();
         trace!("recv_from");
         assert_eq!(rv.len(), 1);
         let rp = rv.pop_front().unwrap();
