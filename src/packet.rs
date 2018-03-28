@@ -317,7 +317,7 @@ mod test {
         p.write().unwrap().meta.size = 1024;
         let mut v = VecDeque::new();
         v.push_back(p);
-        Blob::send_to(&r, &sender, &mut v);
+        Blob::send_to(&r, &sender, &mut v).unwrap();
         let mut rv = Blob::recv_from(&r, &sender).unwrap();
         let rp = rv.pop_front().unwrap();
         assert_eq!(rp.write().unwrap().meta.size, 1024);

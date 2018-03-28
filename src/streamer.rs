@@ -84,6 +84,7 @@ fn recv_window(
 ) -> Result<()> {
     let mut dq = Blob::recv_from(recycler, socket)?;
     while let Some(b) = dq.pop_front() {
+        let b_ = b.clone();
         let mut p = b.write().unwrap();
         let pix = p.index()? as usize;
         let w = pix % NUM_BLOBS;
@@ -92,7 +93,7 @@ fn recv_window(
         //that is a network failure/attack
         {
             if window[w].is_none() {
-                window[w] = Some(b);
+                window[w] = Some(b_);
             } else {
                 debug!("duplicate blob at index {:}", w);
             }
@@ -286,11 +287,12 @@ mod test {
         let mut msgs = VecDeque::new();
         for i in 0..10 {
             let b = resp_re.allocate();
+            let b_ = b.clone();
             let mut w = b.write().unwrap();
             w.data[0] = i as u8;
             w.meta.size = PACKET_SIZE;
             w.meta.set_addr(&addr);
-            msgs.push_back(b);
+            msgs.push_back(b_);
         }
         s_responder.send(msgs).expect("send");
         let mut num = 0;

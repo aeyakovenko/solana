@@ -100,7 +100,7 @@ impl AccountantSkel {
         let timer = Duration::new(1, 0);
         let msgs = r_reader.recv_timeout(timer)?;
         let msgs_ = msgs.clone();
-        let rsps = VecDeque::new();
+        let mut rsps = VecDeque::new();
         {
             for packet in &msgs.read().unwrap().packets {
                 let sz = packet.meta.size;
