@@ -6,241 +6,12 @@ use std::time::Duration;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::thread::{spawn, JoinHandle};
 use result::{Error, Result};
+use packet::{Blob, BlobRecycler, Packet, PacketRecycler, Packets};
 
-const BLOCK_SIZE: usize = 1024 * 8;
-pub const PACKET_SIZE: usize = 256;
-pub const RESP_SIZE: usize = 64 * 1024;
-pub const NUM_RESP: usize = (BLOCK_SIZE * PACKET_SIZE) / RESP_SIZE;
-
-#[derive(Clone, Default)]
-pub struct Meta {
-    pub size: usize,
-    pub addr: [u16; 8],
-    pub port: u16,
-    pub v6: bool,
-}
-
-#[derive(Clone)]
-pub struct Packet {
-    pub data: [u8; PACKET_SIZE],
-    pub meta: Meta,
-}
-
-impl fmt::Debug for Packet {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Packet {{ size: {:?}, addr: {:?} }}",
-            self.meta.size,
-            self.meta.get_addr()
-        )
-    }
-}
-
-impl Default for Packet {
-    fn default() -> Packet {
-        Packet {
-            data: [0u8; PACKET_SIZE],
-            meta: Meta::default(),
-        }
-    }
-}
-
-impl Meta {
-    pub fn get_addr(&self) -> SocketAddr {
-        if !self.v6 {
-            let ipv4 = Ipv4Addr::new(
-                self.addr[0] as u8,
-                self.addr[1] as u8,
-                self.addr[2] as u8,
-                self.addr[3] as u8,
-            );
-            SocketAddr::new(IpAddr::V4(ipv4), self.port)
-        } else {
-            let ipv6 = Ipv6Addr::new(
-                self.addr[0],
-                self.addr[1],
-                self.addr[2],
-                self.addr[3],
-                self.addr[4],
-                self.addr[5],
-                self.addr[6],
-                self.addr[7],
-            );
-            SocketAddr::new(IpAddr::V6(ipv6), self.port)
-        }
-    }
-
-    pub fn set_addr(&mut self, a: &SocketAddr) {
-        match *a {
-            SocketAddr::V4(v4) => {
-                let ip = v4.ip().octets();
-                self.addr[0] = u16::from(ip[0]);
-                self.addr[1] = u16::from(ip[1]);
-                self.addr[2] = u16::from(ip[2]);
-                self.addr[3] = u16::from(ip[3]);
-                self.port = a.port();
-            }
-            SocketAddr::V6(v6) => {
-                self.addr = v6.ip().segments();
-                self.port = a.port();
-                self.v6 = true;
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Packets {
-    pub packets: Vec<Packet>,
-}
-
-impl Default for Packets {
-    fn default() -> Packets {
-        Packets {
-            packets: vec![Packet::default(); BLOCK_SIZE],
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct Response {
-    pub data: [u8; RESP_SIZE],
-    pub meta: Meta,
-}
-
-impl fmt::Debug for Response {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Response {{ size: {:?}, addr: {:?} }}",
-            self.meta.size,
-            self.meta.get_addr()
-        )
-    }
-}
-
-impl Default for Response {
-    fn default() -> Response {
-        Response {
-            data: [0u8; RESP_SIZE],
-            meta: Meta::default(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Responses {
-}
-
-pub type SharedPackets = Arc<RwLock<Packets>>;
-pub type SharedResponse = Arc<RwLock<Response>>;
-pub type Receiver = mpsc::Receiver<SharedPackets>;
-pub type Sender = mpsc::Sender<SharedPackets>;
-pub type ResponseSender = mpsc::Sender<VecDequeue<SharedResponse>>;
-pub type ResponseReceiver = mpsc::Receiver<VecDequeue<SharedResponse>>;
-pub type PacketRecycler = Recycler<Packets>
-pub type ResponseRecycler = Recycler<Response>
-
-#[derive(Clone)]
-struct Recycler<T: Default> {
-    gc: Arc<Mutex<Vec<Arc<RwLock<T>>>>
-}
-
-impl<T: Default> Recycler<T> {
-    pub fn new() ::  {
-        return Arc::new(Mutex::new(Recycler{gc:vec![]}));
-    }
-    pub fn allocate(&self) -> Arc<RwLock<T> {
-        let mut gc = self.gc.lock().expect("lock");
-        gc.pop()
-            .unwrap_or_else(|| Arc::new(RwLock::new(Default::default())))
-    }
-    pub fn recycle(&self, msgs: Arc<RwLock<T>) {
-        let mut gc = recycler.lock().expect("lock");
-        gc.push(msgs);
-    }
-}
-
-type PacketRecycler = Recylcer<Packets>
-type ResponseRecycler = Recylcer<Response> 
-
-impl Packets {
-    fn run_read_from(&mut self, socket: &UdpSocket) -> Result<usize> {
-        self.packets.resize(BLOCK_SIZE, Packet::default());
-        let mut i = 0;
-        socket.set_nonblocking(false)?;
-        for p in &mut self.packets {
-            p.meta.size = 0;
-            match socket.recv_from(&mut p.data) {
-                Err(_) if i > 0 => {
-                    trace!("got {:?} messages", i);
-                    break;
-                }
-                Err(e) => {
-                    info!("recv_from err {:?}", e);
-                    return Err(Error::IO(e));
-                }
-                Ok((nrecv, from)) => {
-                    p.meta.size = nrecv;
-                    p.meta.set_addr(&from);
-                    if i == 0 {
-                        socket.set_nonblocking(true)?;
-                    }
-                }
-            }
-            i += 1;
-        }
-        Ok(i)
-    }
-    fn read_from(&mut self, socket: &UdpSocket) -> Result<()> {
-        let sz = self.run_read_from(socket)?;
-        self.packets.resize(sz, Packet::default());
-        Ok(())
-    }
-}
-
-impl Responses {
-    fn read_from(re: ResponseRecycler, socket: &UdpSocket) -> Result<VecDequeue<SharedResponse>> {
-        let mut v = VecDequeue::new();
-        socket.set_nonblocking(false)?;
-        for _i in 0 .. NUM_RESP {
-            let r = re.allocate();
-            {
-                match socket.recv_from(&mut p.data) {
-                    Err(_) if i > 0 => {
-                        trace!("got {:?} messages", i);
-                        break;
-                    }
-                    Err(e) => {
-                        info!("recv_from err {:?}", e);
-                        return Err(Error::IO(e));
-                    }
-                    Ok((nrecv, from)) => {
-                        p.meta.size = nrecv;
-                        p.meta.set_addr(&from);
-                        if i == 0 {
-                            socket.set_nonblocking(true)?;
-                        }
-                    }
-                }
-            }
-            v.push_back(r);
-        }
-        Ok(v)
-    }
-    fn send_to(re: ResponesRecycler, socket: &UdpSocket, v: &mut VecDequeue<SharedResponse>) -> Result<()> {
-        while Some(r) = v.pop_front() {
-            {
-                let p = r.read().unwrap();
-                let a = p.meta.get_addr();
-                socket.send_to(&p.data[..p.meta.size], &a)?;
-            }
-            re.recycle(r);
-        }
-        Ok(())
-    }
-}
+pub type PacketReceiver = mpsc::Receiver<SharedPackets>;
+pub type PacketSender = mpsc::Sender<SharedPackets>;
+pub type BlobSender = mpsc::Sender<VecDeque<SharedBlob>>;
+pub type BlobReceiver = mpsc::Receiver<VecDeque<SharedBlob>>;
 
 fn recv_loop(
     sock: &UdpSocket,
@@ -282,21 +53,18 @@ pub fn receiver(
     }))
 }
 
-fn recv_send(sock: &UdpSocket, recycler: &ResponseRecycler, r: &ResponseReceiver) -> Result<()> {
+fn recv_send(sock: &UdpSocket, recycler: &BlobRecycler, r: &BlobReceiver) -> Result<()> {
     let timer = Duration::new(1, 0);
     let msgs = r.recv_timeout(timer)?;
-    let msgs_ = msgs.clone();
-    let mut num = 0;
-    msgs.read().unwrap().send_to(sock, &mut num)?;
-    recycle(recycler, msgs_);
+    Blobs::send_to(msgs, sock, recycler)?;
     Ok(())
 }
 
 pub fn responder(
     sock: UdpSocket,
     exit: Arc<AtomicBool>,
-    recycler: ResponseRecycler,
-    r: ResponseReceiver,
+    recycler: BlobRecycler,
+    r: BlobReceiver,
 ) -> JoinHandle<()> {
     spawn(move || loop {
         if recv_send(&sock, &recycler, &r).is_err() || exit.load(Ordering::Relaxed) {
@@ -309,54 +77,39 @@ pub fn responder(
 //window.
 fn recv_window(
     window: &Window,
-    recycler: &ResponseRecycler,
+    recycler: &BlobRecycler,
     consumed: &mut usize,
     socket: &UdpSocket,
     s: &Sender,
 ) -> Result<()> {
-    socket.set_nonblocking(false)?;
-    for i in 0.. {
-        let b = allocate(recycler);
-        let b_ = b.clone();
+    let dq = Blob::recv_from(recycler, socket)?;
+    while let Some(b) = dq.pop_front() {
         let mut p = b.write().unwrap();
-        match socket.recv_from(&mut p.data) {
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                recycle(recycler, b_);
-                break;
+        let pix = p.index()? as usize;
+        let w = pix % NUM_BLOCKS;
+        //TODO, after the block are authenticated
+        //if we get different blocks at the same index
+        //that is a network failure/attack
+        {
+            let mut mw = window.lock().unwrap();
+            if mw[w].is_none() {
+                mw[w] = Some(b_);
             }
-            Err(e) => {
-                recycle(recycler, b_);
-                return Err(Error::IO(e));
-            }
-            Ok((nrecv, from)) => {
-                p.size = nrecv;
-                p.set_addr(&from);
-                if i == 0 {
-                    socket.set_nonblocking(true)?;
-                }
-                let pix = p.index()? as usize;
-                let w = pix % NUM_BLOCKS;
-                //TODO, after the block are authenticated
-                //if we get different blocks at the same index
-                //that is a network failure/attack
-                {
-                    let mut mw = window.lock().unwrap();
-                    if mw[w].is_none() {
-                        mw[w] = Some(b_);
-                    }
-                    //send a contiguous set of blocks
-                    loop {
-                        let k = *consumed % NUM_BLOCKS;
-                        match mw[k].clone() {
-                            None => break,
-                            Some(x) => {
-                                s.send(x)?;
-                                mw[k] = None;
-                            }
-                        }
-                        *consumed += 1;
+            //send a contiguous set of blocks
+            let mut dq = VecDeque::new();
+            loop {
+                let k = *consumed % NUM_BLOCKS;
+                match mw[k].clone() {
+                    None => break,
+                    Some(x) => {
+                        dq.push_front(x);
+                        mw[k] = None;
                     }
                 }
+                *consumed += 1;
+            }
+            if dq.len() > 0 {
+                s.send(sq)?;
             }
         }
     }
@@ -364,7 +117,7 @@ fn recv_window(
 }
 
 
-pub fn window(sock: UdpSocket, exit: Arc<AtomicBool>, r: ResponseRecycler, s: ResponseSender) -> JoinHandle<()> {
+pub fn window(sock: UdpSocket, exit: Arc<AtomicBool>, r: BlobRecycler, s: BlobSender) -> JoinHandle<()> {
     spawn(move || {
         let window = Arc::new(Mutex::new(Vec::new()));
         let mut consumed = 0;
@@ -487,7 +240,7 @@ mod test {
     use std::sync::mpsc::channel;
     use std::io::Write;
     use std::io;
-    use streamer::{allocate, receiver, responder, Packet, Packets, Receiver, Response, Responses,
+    use streamer::{allocate, receiver, responder, Packet, Packets, Receiver, Blob, Blobs,
                    PACKET_SIZE};
 
     fn get_msgs(r: Receiver, num: &mut usize) {
@@ -534,8 +287,7 @@ mod test {
     pub fn streamer_debug() {
         write!(io::sink(), "{:?}", Packet::default()).unwrap();
         write!(io::sink(), "{:?}", Packets::default()).unwrap();
-        write!(io::sink(), "{:?}", Response::default()).unwrap();
-        write!(io::sink(), "{:?}", Responses::default()).unwrap();
+        write!(io::sink(), "{:?}", Blob::default()).unwrap();
     }
     #[test]
     pub fn streamer_send_test() {
@@ -543,17 +295,17 @@ mod test {
         let addr = read.local_addr().unwrap();
         let send = UdpSocket::bind("127.0.0.1:0").expect("bind");
         let exit = Arc::new(AtomicBool::new(false));
-        let packet_recycler = Arc::new(Mutex::new(Vec::new()));
-        let resp_recycler = Arc::new(Mutex::new(Vec::new()));
+        let packet_recycler = PacketRecycler::new();
+        let resp_recycler = BlobRecycler::new();
         let (s_reader, r_reader) = channel();
         let t_receiver = receiver(read, exit.clone(), packet_recycler.clone(), s_reader).unwrap();
         let (s_responder, r_responder) = channel();
         let t_responder = responder(send, exit.clone(), resp_recycler.clone(), r_responder);
-        let msgs = allocate(&resp_recycler);
+        let msg = allocate(&resp_recycler);
         msgs.write()
             .unwrap()
             .responses
-            .resize(10, Response::default());
+            .resize(10, Blob::default());
         for (i, w) in msgs.write().unwrap().responses.iter_mut().enumerate() {
             w.data[0] = i as u8;
             w.meta.size = PACKET_SIZE;
