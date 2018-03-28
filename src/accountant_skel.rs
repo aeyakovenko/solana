@@ -13,6 +13,7 @@ use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::thread::{spawn, JoinHandle};
+use std::collections::VecDeque;
 use std::default::Default;
 use serde_json;
 
@@ -94,13 +95,13 @@ impl AccountantSkel {
         &mut self,
         r_reader: &streamer::PacketReceiver,
         s_responder: &streamer::BlobSender,
-        packet_re: &streamer::PacketRecycler,
-        blob_re: &streamer::BlobRecycler,
+        packet_re: &packet::PacketRecycler,
+        blob_re: &packet::BlobRecycler,
     ) -> Result<()> {
         let timer = Duration::new(1, 0);
         let msgs = r_reader.recv_timeout(timer)?;
         let msgs_ = msgs.clone();
-        let rsps = VeDeque::new();
+        let rsps = VecDeque::new();
         {
             for packet in &msgs.read().unwrap().packets {
                 let sz = packet.meta.size;
@@ -118,12 +119,11 @@ impl AccountantSkel {
                     rsps.push_back(blob);
                 }
             }
-            ursps.responses.resize(num, streamer::Response::default());
         }
         if rsps.len() > 0 {
             s_responder.send(rsps)?;
         }
-        streamer::recycle(packet_recycler, msgs_);
+        packet_re.recycle(msgs_);
         Ok(())
     }
 

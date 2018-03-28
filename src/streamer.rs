@@ -1,13 +1,12 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::fmt;
 use std::time::Duration;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::net::UdpSocket;
 use std::thread::{spawn, JoinHandle};
 use std::collections::VecDeque;
-use result::{Error, Result};
-use packet::{Blob, BlobRecycler, Packet, PacketRecycler, SharedBlob, SharedPackets, NUM_BLOBS};
+use result::Result;
+use packet::{Blob, BlobRecycler, PacketRecycler, SharedBlob, SharedPackets, NUM_BLOBS};
 
 pub type PacketReceiver = mpsc::Receiver<SharedPackets>;
 pub type PacketSender = mpsc::Sender<SharedPackets>;
@@ -24,7 +23,7 @@ fn recv_loop(
         let msgs = re.allocate();
         let msgs_ = msgs.clone();
         loop {
-            match msgs.write().unwrap().read_from(sock) {
+            match msgs.write().unwrap().recv_from(sock) {
                 Ok(()) => {
                     channel.send(msgs_)?;
                     break;
@@ -57,7 +56,7 @@ pub fn receiver(
 fn recv_send(sock: &UdpSocket, recycler: &BlobRecycler, r: &BlobReceiver) -> Result<()> {
     let timer = Duration::new(1, 0);
     let msgs = r.recv_timeout(timer)?;
-    Blob::send_to(msgs, sock, recycler)?;
+    Blob::send_to(recycler, sock, &mut msgs)?;
     Ok(())
 }
 
@@ -153,7 +152,8 @@ mod bench {
     use std::sync::mpsc::channel;
     use std::sync::atomic::{AtomicBool, Ordering};
     use result::Result;
-    use streamer::{allocate, receiver, recycle, Packet, PacketRecycler, Receiver, PACKET_SIZE};
+    use streamer::{allocate, receiver, recycle, Packet, PacketRecycler, Receiver};
+    use packet::PACKET_SIZE;
 
     fn producer(
         addr: &SocketAddr,
@@ -243,17 +243,18 @@ mod bench {
 
 #[cfg(test)]
 mod test {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::net::UdpSocket;
     use std::time::Duration;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::channel;
     use std::io::Write;
     use std::io;
-    use packet::{Blob, BlobRecycler, Packet, PacketRecycler, Packets};
+    use std::collections::VecDeque;
+    use packet::{Blob, BlobRecycler, Packet, PacketRecycler, Packets, PACKET_SIZE};
     use streamer::{receiver, responder, PacketReceiver};
 
-    fn get_msgs(r: Receiver, num: &mut usize) {
+    fn get_msgs(r: PacketReceiver, num: &mut usize) {
         for _t in 0..5 {
             let timer = Duration::new(1, 0);
             match r.recv_timeout(timer) {
@@ -278,18 +279,18 @@ mod test {
         let send = UdpSocket::bind("127.0.0.1:0").expect("bind");
         let exit = Arc::new(AtomicBool::new(false));
         let packet_recycler = PacketRecycler::new();
-        let resp_recycler = BlobRecycler::new();
+        let resp_re = BlobRecycler::new();
         let (s_reader, r_reader) = channel();
         let t_receiver = receiver(read, exit.clone(), packet_recycler.clone(), s_reader).unwrap();
         let (s_responder, r_responder) = channel();
-        let t_responder = responder(send, exit.clone(), resp_recycler.clone(), r_responder);
-        let msg = allocate(&resp_recycler);
-        msgs.write().unwrap().responses.resize(10, Blob::default());
-        for (i, w) in msgs.write().unwrap().responses.iter_mut().enumerate() {
+        let t_responder = responder(send, exit.clone(), resp_re.clone(), r_responder);
+        let mut msgs = VecDeque::new();
+        for i in 0..10 {
+            let mut w = resp_re.allocate();
             w.data[0] = i as u8;
             w.meta.size = PACKET_SIZE;
             w.meta.set_addr(&addr);
-            assert_eq!(w.meta.get_addr(), addr);
+            msgs.push_back(w);
         }
         s_responder.send(msgs).expect("send");
         let mut num = 0;

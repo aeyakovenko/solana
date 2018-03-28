@@ -10,9 +10,9 @@ pub type PacketRecycler = Recycler<Packets>;
 pub type BlobRecycler = Recycler<Blob>;
 
 const NUM_PACKETS: usize = 1024 * 8;
-const PACKET_SIZE: usize = 256;
 const BLOB_SIZE: usize = 64 * 1024;
-const NUM_BLOBS: usize = (NUM_PACKETS * PACKET_SIZE) / BLOB_SIZE;
+pub const PACKET_SIZE: usize = 256;
+pub const NUM_BLOBS: usize = (NUM_PACKETS * PACKET_SIZE) / BLOB_SIZE;
 
 #[derive(Clone, Default)]
 pub struct Meta {
@@ -181,7 +181,7 @@ impl Packets {
         }
         Ok(i)
     }
-    pub fn read_from(&mut self, socket: &UdpSocket) -> Result<()> {
+    pub fn recv_from(&mut self, socket: &UdpSocket) -> Result<()> {
         let sz = self.run_read_from(socket)?;
         self.packets.resize(sz, Packet::default());
         Ok(())
@@ -196,7 +196,8 @@ impl Packets {
 }
 
 impl Blob {
-    pub fn read_from(re: &BlobRecycler, socket: &UdpSocket) -> Result<VecDeque<SharedBlob>> {
+    pub fn index(&self) -> Result<usize> {}
+    pub fn recv_from(re: &BlobRecycler, socket: &UdpSocket) -> Result<VecDeque<SharedBlob>> {
         let mut v = VecDeque::new();
         socket.set_nonblocking(false)?;
         for i in 0..NUM_BLOBS {
@@ -274,7 +275,7 @@ mod test {
             m.meta.size = 256;
         }
         p.read().unwrap().send_to(&sender).unwrap();
-        p.write().unwrap().read_from(&reader).unwrap();
+        p.write().unwrap().recv_from(&reader).unwrap();
         for m in p.write().unwrap().packets.iter_mut() {
             assert_eq!(m.meta.size, 256);
             assert_eq!(m.meta.get_addr(), addr);
@@ -295,7 +296,7 @@ mod test {
         let mut v = VecDeque::new();
         v.push_back(p);
         Blob::send_to(&r, &sender, &mut v);
-        let mut rv = Blob::read_from(&r, &sender).unwrap();
+        let mut rv = Blob::recv_from(&r, &sender).unwrap();
         let rp = rv.pop_front().unwrap();
         assert_eq!(rp.write().unwrap().meta.size, 1024);
         r.recycle(rp);
@@ -314,7 +315,7 @@ mod test {
         let mut v = VecDeque::new();
         v.push_back(p);
         Blob::send_to(&r, &sender, &mut v);
-        let mut rv = Blob::read_from(&r, &sender).unwrap();
+        let mut rv = Blob::recv_from(&r, &sender).unwrap();
         let rp = rv.pop_front().unwrap();
         assert_eq!(rp.write().unwrap().meta.size, 1024);
         r.recycle(rp);
