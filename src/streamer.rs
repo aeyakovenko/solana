@@ -116,19 +116,24 @@ fn recv_window(
     Ok(())
 }
 
-
-pub fn window(sock: UdpSocket, exit: Arc<AtomicBool>, r: BlobRecycler, s: BlobSender) -> JoinHandle<()> {
+pub fn window(
+    sock: UdpSocket,
+    exit: Arc<AtomicBool>,
+    r: BlobRecycler,
+    s: BlobSender,
+) -> JoinHandle<()> {
     spawn(move || {
         let window = Arc::new(Mutex::new(Vec::new()));
         let mut consumed = 0;
         loop {
-            if recv_window(&window, &r, &mut consumed, &sock, &s).is_err() || exit.load(Ordering::Relaxed) {
+            if recv_window(&window, &r, &mut consumed, &sock, &s).is_err()
+                || exit.load(Ordering::Relaxed)
+            {
                 break;
             }
         }
     })
 }
-
 
 #[cfg(all(feature = "unstable", test))]
 mod bench {
@@ -240,7 +245,7 @@ mod test {
     use std::sync::mpsc::channel;
     use std::io::Write;
     use std::io;
-    use streamer::{allocate, receiver, responder, Packet, Packets, Receiver, Blob, Blobs,
+    use streamer::{allocate, receiver, responder, Blob, Blobs, Packet, Packets, Receiver,
                    PACKET_SIZE};
 
     fn get_msgs(r: Receiver, num: &mut usize) {
@@ -302,10 +307,7 @@ mod test {
         let (s_responder, r_responder) = channel();
         let t_responder = responder(send, exit.clone(), resp_recycler.clone(), r_responder);
         let msg = allocate(&resp_recycler);
-        msgs.write()
-            .unwrap()
-            .responses
-            .resize(10, Blob::default());
+        msgs.write().unwrap().responses.resize(10, Blob::default());
         for (i, w) in msgs.write().unwrap().responses.iter_mut().enumerate() {
             w.data[0] = i as u8;
             w.meta.size = PACKET_SIZE;
