@@ -7,6 +7,7 @@ use std::net::UdpSocket;
 use bincode::{deserialize, serialize};
 use result::Result;
 use streamer;
+use packet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -91,40 +92,37 @@ impl AccountantSkel {
     }
     fn process(
         &mut self,
-        r_reader: &streamer::Receiver,
-        s_responder: &streamer::Responder,
-        packet_recycler: &streamer::PacketRecycler,
-        response_recycler: &streamer::ResponseRecycler,
+        r_reader: &streamer::PacketReceiver,
+        s_responder: &streamer::BlobSender,
+        packet_re: &streamer::PacketRecycler,
+        blob_re: &streamer::BlobRecycler,
     ) -> Result<()> {
         let timer = Duration::new(1, 0);
         let msgs = r_reader.recv_timeout(timer)?;
         let msgs_ = msgs.clone();
-        let rsps = streamer::allocate(response_recycler);
-        let rsps_ = rsps.clone();
+        let rsps = VeDeque::new();
         {
-            let mut num = 0;
-            let mut ursps = rsps.write().unwrap();
             for packet in &msgs.read().unwrap().packets {
                 let sz = packet.meta.size;
                 let req = deserialize(&packet.data[0..sz])?;
                 if let Some(resp) = self.process_request(req) {
-                    if ursps.responses.len() <= num {
-                        ursps
-                            .responses
-                            .resize((num + 1) * 2, streamer::Response::default());
+                    let blob = blob_re.allocate();
+                    {
+                        let mut b = blob.write().unlock();
+                        let v = serialize(&resp)?;
+                        let len = v.len();
+                        b.data[..len].copy_from_slice(&v);
+                        b.meta.size = len;
+                        b.meta.set_addr(&packet.meta.get_addr());
                     }
-                    let rsp = &mut ursps.responses[num];
-                    let v = serialize(&resp)?;
-                    let len = v.len();
-                    rsp.data[..len].copy_from_slice(&v);
-                    rsp.meta.size = len;
-                    rsp.meta.set_addr(&packet.meta.get_addr());
-                    num += 1;
+                    rsps.push_back(blob);
                 }
             }
             ursps.responses.resize(num, streamer::Response::default());
         }
-        s_responder.send(rsps_)?;
+        if rsps.len() > 0 {
+            s_responder.send(rsps)?;
+        }
         streamer::recycle(packet_recycler, msgs_);
         Ok(())
     }
