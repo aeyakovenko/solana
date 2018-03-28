@@ -5,8 +5,9 @@ use std::fmt;
 use std::time::Duration;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::thread::{spawn, JoinHandle};
+use std::collections::VecDeque;
 use result::{Error, Result};
-use packet::{Blob, BlobRecycler, Packet, PacketRecycler, Packets};
+use packet::{Blob, BlobRecycler, Packet, PacketRecycler, SharedBlob, SharedPackets, NUM_BLOBS};
 
 pub type PacketReceiver = mpsc::Receiver<SharedPackets>;
 pub type PacketSender = mpsc::Sender<SharedPackets>;
@@ -16,11 +17,11 @@ pub type BlobReceiver = mpsc::Receiver<VecDeque<SharedBlob>>;
 fn recv_loop(
     sock: &UdpSocket,
     exit: &Arc<AtomicBool>,
-    recycler: &PacketRecycler,
-    channel: &Sender,
+    re: &PacketRecycler,
+    channel: &PacketSender,
 ) -> Result<()> {
     loop {
-        let msgs = allocate(recycler);
+        let msgs = re.allocate();
         let msgs_ = msgs.clone();
         loop {
             match msgs.write().unwrap().read_from(sock) {
@@ -30,7 +31,7 @@ fn recv_loop(
                 }
                 Err(_) => {
                     if exit.load(Ordering::Relaxed) {
-                        recycle(recycler, msgs_);
+                        re.recycle(msgs_);
                         return Ok(());
                     }
                 }
@@ -43,7 +44,7 @@ pub fn receiver(
     sock: UdpSocket,
     exit: Arc<AtomicBool>,
     recycler: PacketRecycler,
-    channel: Sender,
+    channel: PacketSender,
 ) -> Result<JoinHandle<()>> {
     let timer = Duration::new(1, 0);
     sock.set_read_timeout(Some(timer))?;
@@ -56,7 +57,7 @@ pub fn receiver(
 fn recv_send(sock: &UdpSocket, recycler: &BlobRecycler, r: &BlobReceiver) -> Result<()> {
     let timer = Duration::new(1, 0);
     let msgs = r.recv_timeout(timer)?;
-    Blobs::send_to(msgs, sock, recycler)?;
+    Blob::send_to(msgs, sock, recycler)?;
     Ok(())
 }
 
@@ -76,29 +77,31 @@ pub fn responder(
 //TODO, we would need to stick block authentication before we create the
 //window.
 fn recv_window(
-    window: &Window,
+    window: &mut Vec<SharedBlob>,
     recycler: &BlobRecycler,
     consumed: &mut usize,
     socket: &UdpSocket,
-    s: &Sender,
+    s: &BlobSender,
 ) -> Result<()> {
     let dq = Blob::recv_from(recycler, socket)?;
     while let Some(b) = dq.pop_front() {
         let mut p = b.write().unwrap();
         let pix = p.index()? as usize;
-        let w = pix % NUM_BLOCKS;
+        let w = pix % NUM_BLOBS;
         //TODO, after the block are authenticated
         //if we get different blocks at the same index
         //that is a network failure/attack
         {
             let mut mw = window.lock().unwrap();
             if mw[w].is_none() {
-                mw[w] = Some(b_);
+                mw[w] = Some(b);
+            } else {
+                debug!("duplicate blob at index {:}", w);
             }
             //send a contiguous set of blocks
             let mut dq = VecDeque::new();
             loop {
-                let k = *consumed % NUM_BLOCKS;
+                let k = *consumed % NUM_BLOBS;
                 match mw[k].clone() {
                     None => break,
                     Some(x) => {
@@ -109,7 +112,7 @@ fn recv_window(
                 *consumed += 1;
             }
             if dq.len() > 0 {
-                s.send(sq)?;
+                s.send(dq)?;
             }
         }
     }
@@ -123,11 +126,13 @@ pub fn window(
     s: BlobSender,
 ) -> JoinHandle<()> {
     spawn(move || {
-        let window = Arc::new(Mutex::new(Vec::new()));
+        let window = Vec::new();
         let mut consumed = 0;
+        let timer = Duration::new(1, 0);
+        sock.set_read_timeout(Some(timer))?;
         loop {
             if recv_window(&window, &r, &mut consumed, &sock, &s).is_err()
-                || exit.load(Ordering::Relaxed)
+                && exit.load(Ordering::Relaxed)
             {
                 break;
             }
@@ -245,8 +250,8 @@ mod test {
     use std::sync::mpsc::channel;
     use std::io::Write;
     use std::io;
-    use streamer::{allocate, receiver, responder, Blob, Blobs, Packet, Packets, Receiver,
-                   PACKET_SIZE};
+    use packet::{Blob, BlobRecycler, Packet, PacketRecycler, Packets};
+    use streamer::{receiver, responder, PacketReceiver};
 
     fn get_msgs(r: Receiver, num: &mut usize) {
         for _t in 0..5 {
@@ -259,34 +264,6 @@ mod test {
                 break;
             }
         }
-    }
-    #[cfg(ipv6)]
-    #[test]
-    pub fn streamer_send_test_ipv6() {
-        let read = UdpSocket::bind("[::1]:0").expect("bind");
-        let addr = read.local_addr().unwrap();
-        let send = UdpSocket::bind("[::1]:0").expect("bind");
-        let exit = Arc::new(Mutex::new(false));
-        let recycler = Arc::new(Mutex::new(Vec::new()));
-        let (s_reader, r_reader) = channel();
-        let t_receiver = receiver(read, exit.clone(), recycler.clone(), s_reader).unwrap();
-        let (s_responder, r_responder) = channel();
-        let t_responder = responder(send, exit.clone(), recycler.clone(), r_responder);
-        let msgs = allocate(&recycler);
-        msgs.write().unwrap().packets.resize(10, Packet::default());
-        for (i, w) in msgs.write().unwrap().packets.iter_mut().enumerate() {
-            w.data[0] = i as u8;
-            w.size = PACKET_SIZE;
-            w.set_addr(&addr);
-            assert_eq!(w.get_addr(), addr);
-        }
-        s_responder.send(msgs).expect("send");
-        let mut num = 0;
-        get_msgs(r_reader, &mut num);
-        assert_eq!(num, 10);
-        exit.store(true, Ordering::Relaxed);
-        t_receiver.join().expect("join");
-        t_responder.join().expect("join");
     }
     #[test]
     pub fn streamer_debug() {
