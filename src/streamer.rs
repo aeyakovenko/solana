@@ -55,7 +55,7 @@ pub fn receiver(
 
 fn recv_send(sock: &UdpSocket, recycler: &BlobRecycler, r: &BlobReceiver) -> Result<()> {
     let timer = Duration::new(1, 0);
-    let msgs = r.recv_timeout(timer)?;
+    let mut msgs = r.recv_timeout(timer)?;
     Blob::send_to(recycler, sock, &mut msgs)?;
     Ok(())
 }
@@ -82,7 +82,7 @@ fn recv_window(
     socket: &UdpSocket,
     s: &BlobSender,
 ) -> Result<()> {
-    let dq = Blob::recv_from(recycler, socket)?;
+    let mut dq = Blob::recv_from(recycler, socket)?;
     while let Some(b) = dq.pop_front() {
         let mut p = b.write().unwrap();
         let pix = p.index()? as usize;
@@ -285,11 +285,12 @@ mod test {
         let t_responder = responder(send, exit.clone(), resp_re.clone(), r_responder);
         let mut msgs = VecDeque::new();
         for i in 0..10 {
-            let mut w = resp_re.allocate();
+            let b = resp_re.allocate();
+            let mut w = b.write().unwrap();
             w.data[0] = i as u8;
             w.meta.size = PACKET_SIZE;
             w.meta.set_addr(&addr);
-            msgs.push_back(w);
+            msgs.push_back(b);
         }
         s_responder.send(msgs).expect("send");
         let mut num = 0;

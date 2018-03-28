@@ -133,12 +133,16 @@ impl Default for Blob {
     }
 }
 
-#[derive(Clone)]
 pub struct Recycler<T: Default> {
     gc: Arc<Mutex<Vec<Arc<RwLock<T>>>>>,
 }
 
 impl<T: Default> Recycler<T> {
+    pub fn clone(&self) -> Recycler<T> {
+        Recycler {
+            gc: self.gc.clone(),
+        }
+    }
     pub fn new() -> Recycler<T> {
         Recycler {
             gc: Arc::new(Mutex::new(vec![])),

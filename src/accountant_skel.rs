@@ -14,7 +14,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::thread::{spawn, JoinHandle};
 use std::collections::VecDeque;
-use std::default::Default;
 use serde_json;
 
 pub struct AccountantSkel {
@@ -109,7 +108,7 @@ impl AccountantSkel {
                 if let Some(resp) = self.process_request(req) {
                     let blob = blob_re.allocate();
                     {
-                        let mut b = blob.write().unlock();
+                        let mut b = blob.write().unwrap();
                         let v = serialize(&resp)?;
                         let len = v.len();
                         b.data[..len].copy_from_slice(&v);
@@ -139,24 +138,21 @@ impl AccountantSkel {
         local.set_port(0);
         let write = UdpSocket::bind(local)?;
 
-        let packet_recycler = Arc::new(Mutex::new(Vec::new()));
-        let response_recycler = Arc::new(Mutex::new(Vec::new()));
+        let packet_re = packet::PacketRecycler::new();
+        let blob_re = packet::BlobRecycler::new();
         let (s_reader, r_reader) = channel();
-        let t_receiver = streamer::receiver(read, exit.clone(), packet_recycler.clone(), s_reader)?;
+        let t_receiver = streamer::receiver(read, exit.clone(), packet_re.clone(), s_reader)?;
 
         let (s_responder, r_responder) = channel();
-        let t_responder =
-            streamer::responder(write, exit.clone(), response_recycler.clone(), r_responder);
+        let t_responder = streamer::responder(write, exit.clone(), blob_re.clone(), r_responder);
 
         let t_server = spawn(move || {
             if let Ok(me) = Arc::try_unwrap(obj) {
                 loop {
-                    let e = me.lock().unwrap().process(
-                        &r_reader,
-                        &s_responder,
-                        &packet_recycler,
-                        &response_recycler,
-                    );
+                    let e =
+                        me.lock()
+                            .unwrap()
+                            .process(&r_reader, &s_responder, &packet_re, &blob_re);
                     if e.is_err() && exit.load(Ordering::Relaxed) {
                         break;
                     }
