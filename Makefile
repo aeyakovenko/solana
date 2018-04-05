@@ -42,5 +42,5 @@ ipv6:
 
 lib:libcuda_verify_ed25519.a
 libcuda_verify_ed25519.a:dummy.c
-	cc -o dummy.o -c dummy.c
+	cc -fPIC -o dummy.o -c dummy.c
 	ar -cvq libcuda_verify_ed25519.a dummy.o

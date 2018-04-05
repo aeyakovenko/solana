@@ -13,8 +13,8 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 fn main() {
-    let addr = "127.0.0.1:9000";
-    let send_addr = "127.0.0.1:9001";
+    let addr = "192.168.88.253:9000";
+    let send_addr = "192.168.88.210:9001";
 
     let mint: Mint = serde_json::from_reader(stdin()).unwrap();
     let mint_keypair = mint.keypair();
@@ -52,11 +52,18 @@ fn main() {
 
     println!("Transferring 1 unit {} times...", txs);
     let now = Instant::now();
-    let mut _sig = Default::default();
-    for tr in transactions {
-        _sig = tr.sig;
-        acc.transfer_signed(tr).unwrap();
-    }
+    let sz = transactions.len()/32; //16 threads
+    let chunks: Vec<_> = transactions.chunks(sz).collect();
+    let _: Vec<_> = chunks.into_par_iter().map(|trs| {
+        println!("Transferring 1 unit {} times...", trs.len());
+        let send_addr = "192.168.88.210:0";
+        let socket = UdpSocket::bind(send_addr).unwrap();
+        let acc = AccountantStub::new(addr, socket);
+        for tr in trs {
+            acc.transfer_signed(tr.clone()).unwrap();
+        }
+        ()
+    }).collect();
     println!("Waiting for last transaction to be confirmed...",);
     let mut val = mint_balance;
     let mut prev = 0;
