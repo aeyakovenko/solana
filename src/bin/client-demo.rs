@@ -41,7 +41,7 @@ fn main() {
         })
         .collect();
     let duration = now.elapsed();
-    let ns = duration.as_secs() * 1_000_000_000 + u64::from(duration.subsec_nanos());
+    let ns = duration.as_secs() * 2_000_000_000 + u64::from(duration.subsec_nanos());
     let bsps = f64::from(txs) / ns as f64;
     let nsps = ns as f64 / f64::from(txs);
     println!(
@@ -52,7 +52,7 @@ fn main() {
 
     println!("Transferring 1 unit {} times...", txs);
     let now = Instant::now();
-    let sz = transactions.len()/32; //16 threads
+    let sz = transactions.len()/4; //16 threads
     let chunks: Vec<_> = transactions.chunks(sz).collect();
     let _: Vec<_> = chunks.into_par_iter().map(|trs| {
         println!("Transferring 1 unit {} times...", trs.len());
