@@ -8,6 +8,7 @@ pub mod entry;
 #[cfg(feature = "erasure")]
 pub mod erasure;
 pub mod event;
+pub mod logger;
 pub mod hash;
 pub mod historian;
 pub mod ledger;
@@ -18,7 +19,6 @@ pub mod recorder;
 pub mod result;
 pub mod signature;
 pub mod streamer;
-pub mod subscribers;
 pub mod transaction;
 extern crate bincode;
 extern crate byteorder;

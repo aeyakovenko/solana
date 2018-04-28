@@ -83,7 +83,7 @@ fn main() {
     });
 
     let socket = UdpSocket::bind(&send_addr).unwrap();
-    let mut acc = AccountantStub::new(&addr, socket);
+    let mut acc = AccountantStub::new(addr.parse().unwrap(), socket);
 
     println!("Get last ID...");
     let last_id = acc.get_last_id().wait().unwrap();
@@ -122,7 +122,7 @@ fn main() {
         println!("Transferring 1 unit {} times...", trs.len());
         let send_addr = "0.0.0.0:0";
         let socket = UdpSocket::bind(send_addr).unwrap();
-        let acc = AccountantStub::new(&addr, socket);
+        let acc = AccountantStub::new(addr.parse().unwrap(), socket);
         for tr in trs {
             acc.transfer_signed(tr.clone()).unwrap();
         }
