@@ -7,7 +7,7 @@ use sigverify;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::thread::{spawn, JoinHandle};
+use std::thread::{Builder, JoinHandle};
 use std::time::Instant;
 use streamer;
 use timing;
@@ -74,12 +74,15 @@ impl SigVerifyStage {
         packet_receiver: Arc<Mutex<streamer::PacketReceiver>>,
         verified_sender: Arc<Mutex<Sender<Vec<(SharedPackets, Vec<u8>)>>>>,
     ) -> JoinHandle<()> {
-        spawn(move || loop {
-            let e = Self::verifier(&packet_receiver.clone(), &verified_sender.clone());
-            if e.is_err() && exit.load(Ordering::Relaxed) {
-                break;
-            }
-        })
+        Builder::new()
+            .name("solana-banking-stage".to_string())
+            .spawn(move || loop {
+                let e = Self::verifier(&packet_receiver.clone(), &verified_sender.clone());
+                if e.is_err() && exit.load(Ordering::Relaxed) {
+                    break;
+                }
+            })
+            .unwrap()
     }
 
     fn verifier_services(

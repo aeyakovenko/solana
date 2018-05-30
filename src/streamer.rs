@@ -505,7 +505,7 @@ mod bench {
     use std::sync::mpsc::channel;
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;
-    use std::thread::{spawn, JoinHandle};
+    use std::thread::{Builder, JoinHandle};
     use std::time::Duration;
     use std::time::SystemTime;
     use streamer::{receiver, PacketReceiver};
@@ -523,19 +523,22 @@ mod bench {
             w.meta.size = PACKET_DATA_SIZE;
             w.meta.set_addr(&addr);
         }
-        spawn(move || loop {
-            if exit.load(Ordering::Relaxed) {
-                return;
-            }
-            let mut num = 0;
-            for p in msgs_.read().unwrap().packets.iter() {
-                let a = p.meta.addr();
-                assert!(p.meta.size < BLOB_SIZE);
-                send.send_to(&p.data[..p.meta.size], &a).unwrap();
-                num += 1;
-            }
-            assert_eq!(num, 10);
-        })
+        Builder::new()
+            .name("solana-test-producer".to_string())
+            .spawn(move || loop {
+                if exit.load(Ordering::Relaxed) {
+                    return;
+                }
+                let mut num = 0;
+                for p in msgs_.read().unwrap().packets.iter() {
+                    let a = p.meta.addr();
+                    assert!(p.meta.size < BLOB_SIZE);
+                    send.send_to(&p.data[..p.meta.size], &a).unwrap();
+                    num += 1;
+                }
+                assert_eq!(num, 10);
+            })
+            .unwrap()
     }
 
     fn sink(
@@ -544,20 +547,23 @@ mod bench {
         rvs: Arc<Mutex<usize>>,
         r: PacketReceiver,
     ) -> JoinHandle<()> {
-        spawn(move || loop {
-            if exit.load(Ordering::Relaxed) {
-                return;
-            }
-            let timer = Duration::new(1, 0);
-            match r.recv_timeout(timer) {
-                Ok(msgs) => {
-                    let msgs_ = msgs.clone();
-                    *rvs.lock().unwrap() += msgs.read().unwrap().packets.len();
-                    recycler.recycle(msgs_);
+        Builder::new()
+            .name("solana-test-sink".to_string())
+            .spawn(move || loop {
+                if exit.load(Ordering::Relaxed) {
+                    return;
                 }
-                _ => (),
-            }
-        })
+                let timer = Duration::new(1, 0);
+                match r.recv_timeout(timer) {
+                    Ok(msgs) => {
+                        let msgs_ = msgs.clone();
+                        *rvs.lock().unwrap() += msgs.read().unwrap().packets.len();
+                        recycler.recycle(msgs_);
+                    }
+                    _ => (),
+                }
+            })
+            .unwrap()
     }
 
     fn bench_streamer_with_result() -> Result<()> {
