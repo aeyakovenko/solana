@@ -110,6 +110,8 @@ fn main() {
         num_nodes + 2,
         &mut c_threads,
     );
+    assert_eq!(validators.len(), num_nodes + 2);
+    println!("validators {:?}", validators);
 
     if stdin_isatty() {
         eprintln!("nothing found on stdin, expected a json file");
@@ -295,7 +297,7 @@ fn converge(
         exit.clone(),
     ).expect("DataReplicator::new");
     //wait for the network to converge
-    for _ in 0..30 {
+    for _ in 0..60 {
         let min = spy_ref.read().unwrap().convergence();
         if num_nodes as u64 == min {
             println!("converged!");

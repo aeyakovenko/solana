@@ -209,11 +209,12 @@ impl Crdt {
         if self.table.get(&v.id).is_none() || (v.version > self.table[&v.id].version) {
             //somehow we signed a message for our own identity with a higher version that
             // we have stored ourselves
-            trace!(
-                "me: {:?} v.id: {:?} version: {}",
+            info!(
+                "INSERT me: {:?} v.id: {:?} version: {} addr: {:?}",
                 &self.me[..4],
                 &v.id[..4],
-                v.version
+                v.version,
+                v.gossip_addr,
             );
             self.update_index += 1;
             let _ = self.table.insert(v.id.clone(), v.clone());
