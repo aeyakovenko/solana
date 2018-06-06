@@ -329,6 +329,7 @@ impl Blob {
                         if e.kind() != io::ErrorKind::WouldBlock {
                             info!("recv_from err {:?}", e);
                         }
+                        info!("recv_from err {:?} {:?}", e, socket.local_addr().unwrap());
                         return Err(Error::IO(e));
                     }
                     Ok((nrecv, from)) => {

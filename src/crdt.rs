@@ -429,7 +429,7 @@ impl Crdt {
         let v = options[n].clone();
         let remote_update_index = *self.remote.get(&v.id).unwrap_or(&0);
         let req = Protocol::RequestUpdates(remote_update_index, self.table[&self.me].clone());
-        trace!(
+        info!(
             "created gossip request from {:?} to {:?} {}",
             &self.me[..4],
             &v.id[..4],
@@ -645,9 +645,10 @@ impl Crdt {
                     &response_sender,
                 );
                 if e.is_err() {
+                    let addrs: Vec<_> = obj.read().unwrap().table.values().map(|x| x.gossip_addr).collect();
                     info!(
-                        "run_listen timeout, table size: {}",
-                        obj.read().unwrap().table.len()
+                        "run_listen timeout, table: {:?}",
+                        addrs
                     );
                 }
                 if exit.load(Ordering::Relaxed) {
