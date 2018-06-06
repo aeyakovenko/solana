@@ -541,7 +541,7 @@ impl Crdt {
         match deserialize(&blob.data[..blob.meta.size]) {
             // TODO sigverify these
             Ok(Protocol::RequestUpdates(v, reqdata)) => {
-                trace!("RequestUpdates {}", v);
+                info!("RequestUpdates {} from: {}", v, reqdata.gossip_addr);
                 let addr = reqdata.gossip_addr;
                 // only lock for this call, dont lock during IO `sock.send_to` or `sock.recv_from`
                 let (from, ups, data) = obj.read()
