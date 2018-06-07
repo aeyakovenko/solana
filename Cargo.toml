@@ -13,6 +13,10 @@ authors = [
 ]
 license = "Apache-2.0"
 
+# build release with debug symbols
+[profile.release]
+debug = true
+
 [[bin]]
 name = "solana-client-demo"
 path = "src/bin/client-demo.rs"
