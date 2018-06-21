@@ -208,12 +208,6 @@ pub mod tests {
         let transfer_amount = 501;
         let bob_keypair = KeyPair::new();
         for i in 0..num_blobs {
-            let b = resp_recycler.allocate();
-            let b_ = b.clone();
-            let mut w = b.write().unwrap();
-            w.set_index(i).unwrap();
-            w.set_id(leader_id).unwrap();
-
             let entry0 = Entry::new(&cur_hash, i, vec![]);
             bank.register_entry_id(&cur_hash);
             cur_hash = hash(&cur_hash);
@@ -232,13 +226,21 @@ pub mod tests {
 
             alice_ref_balance -= transfer_amount;
 
-            let serialized_entry = serialize(&vec![entry0, entry1]).unwrap();
+            for entry in [entry0, entry1] {
+                let b = resp_recycler.allocate();
+                let b_ = b.clone();
+                let mut w = b.write().unwrap();
+                w.set_index(i).unwrap();
+                w.set_id(leader_id).unwrap();
 
-            w.data_mut()[..serialized_entry.len()].copy_from_slice(&serialized_entry);
-            w.set_size(serialized_entry.len());
-            w.meta.set_addr(&replicate_addr);
-            drop(w);
-            msgs.push_back(b_);
+                let serialized_entry = serialize(&entry).unwrap();
+
+                w.data_mut()[..serialized_entry.len()].copy_from_slice(&serialized_entry);
+                w.set_size(serialized_entry.len());
+                w.meta.set_addr(&replicate_addr);
+                drop(w);
+                msgs.push_back(b_);
+            }
         }
 
         // send the blobs into the socket
