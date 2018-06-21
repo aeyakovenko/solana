@@ -6,6 +6,6 @@ for ff in $ips; do
     echo starting $ff
     ssh $ff -n "export PATH=/home/ubuntu/.cargo:$PATH && cd /home/ubuntu/solana && ./multinode-demo/validator.sh $leader:~/solana" &
 done
-
+sleep 30
 ./multinode-demo/client.sh $leader:~/solana 9
 ./kill.sh
