@@ -373,7 +373,7 @@ fn converge(
     ).expect("DataReplicator::new");
     let mut rv = vec![];
     //wait for the network to converge, 30 seconds should be plenty
-    for _ in 0..30 {
+    for _ in 0..60 {
         let v: Vec<ReplicatedData> = spy_ref
             .read()
             .unwrap()
