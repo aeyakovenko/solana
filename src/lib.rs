@@ -15,6 +15,7 @@ pub mod blob_fetch_stage;
 pub mod budget;
 pub mod choose_gossip_peer_strategy;
 pub mod crdt;
+pub mod tictactoe;
 pub mod drone;
 pub mod entry;
 pub mod entry_writer;
