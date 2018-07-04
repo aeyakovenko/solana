@@ -20,6 +20,7 @@ pub mod entry;
 pub mod entry_writer;
 #[cfg(feature = "erasure")]
 pub mod erasure;
+pub mod fast_ledger;
 pub mod fetch_stage;
 pub mod fullnode;
 pub mod hash;
