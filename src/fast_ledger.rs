@@ -6,11 +6,11 @@ type Hash = usize;
 type PublicKey = usize;
 
 struct StateMachine {
-    /// append only slice of [Tx]
+    /// append only array of Tx structures
     record: Record,
     /// state machine for transactions and contract memory
     page_table: PageTable,
-    /// our PoH generator
+    /// append only array of PoHEntry structures
     poh: PoH,
 }
 
@@ -37,13 +37,13 @@ struct Page {
 impl hasht::Key for PublicKey {
     fn start(&self) -> usize {
         self[0]
-            | self[1] << (1 * 8)
-            | self[2] << (2 * 8)
-            | self[3] << (3 * 8)
-            | self[4] << (4 * 8)
-            | self[5] << (5 * 8)
-            | self[6] << (6 * 8)
-            | self[7] << (7 * 8)
+            | (self[1] << (1 * 8))
+            | (self[2] << (2 * 8))
+            | (self[3] << (3 * 8))
+            | (self[4] << (4 * 8))
+            | (self[5] << (5 * 8))
+            | (self[6] << (6 * 8))
+            | (self[7] << (7 * 8))
     }
     fn unused(&self) -> bool {
         *self == 0usize
@@ -79,7 +79,7 @@ impl Record {
 }
 
 struct PageTable {
-    /// HashT over a large slice of [Page]
+    /// HashT over a large array of [Page]
     page_table: Vec<Page>,
     table_lock: RwLock<bool>,
     mem_locks: Mutex<HashSet<PublicKey>>,
@@ -92,6 +92,7 @@ struct PoH {
     dummy_current: Hash,
 }
 
+/// Points to indexes into the Record structure
 #[crepr]
 struct PohEntry {
     poh_hash: Hash,
@@ -199,7 +200,7 @@ impl StateMachine {
                 size: 0,
                 pointer: 0,
             };
-            self.page_table.insert(&tx.to, page);
+            PageT::insert(&self.page_table, &tx.to, page);
         }
         *table_lock = false;
     }
