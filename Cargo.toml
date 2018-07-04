@@ -49,6 +49,7 @@ unstable = []
 ipv6 = []
 cuda = []
 erasure = []
+parex = []
 
 [dependencies]
 rayon = "1.0.0"
