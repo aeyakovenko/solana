@@ -53,6 +53,7 @@ unstable = []
 ipv6 = []
 cuda = []
 erasure = []
+parex = []
 
 [dependencies]
 rayon = "1.0.0"
@@ -108,4 +109,8 @@ harness = false
 
 [[bench]]
 name = "streamer"
+harness = false
+
+[[bench]]
+name = "crit_page_table"
 harness = false
