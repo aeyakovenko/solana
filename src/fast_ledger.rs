@@ -1,7 +1,10 @@
-use std::io::{BufWriter};
+extern crate memmap;
+use std::collections::{BTreeMap, HashSet};
+use std::fs::File;
+use std::io::BufWriter;
 use std::mem::size_of;
 use std::sync::mpsc::{Receiver, Sender};
-use memmap;
+use std::sync::{Mutex, RwLock};
 
 //dummy defs
 type Hash = usize;
@@ -48,19 +51,23 @@ struct Call {
     /// the address of the program we want to call
     contract: PublicKey,
     /// amount to send to the contract
-    amount: u64, 
+    amount: u64,
     /// OS scheduling fee
     fee: u64,
     /// method to call in the contract
     method: u8,
     /// number of keys to load, aka the to key
     inkeys: u8,
+    /// usedata in bytes
+    num_userdata: u8,
     /// number of spends expected in this call
-    numspends; u8,
+    num_spends: u8,
     /// number of proofs of ownership of `inkeys`, `caller` is proven by the signature
-    numproofs; u8,
+    num_proofs: u8,
     /// Sender appends an array of PublicKeys, Signature, and key indexies of size `numproofs`
-    /// {Call,[PublicKey; inkeys],[Sig; numproofs],[u8; numproofs]}
+    /// {Call,[PublicKey; inkeys],[userdata],[Sig; num_proofs],[u8; num_proofs]}
+    /// unused
+    unused: [u8; 3],
 }
 
 /// simple transaction over a Call
@@ -68,13 +75,13 @@ struct Call {
 /// this
 #[repr(C)]
 struct Tx {
-    call: Call, //inkeys = 1, numspends = 1, numproofs = 0
+    call: Call,             //inkeys = 1, numspends = 1, numproofs = 0
     destination: PublicKey, //simple defintion that makes it easy to define the rest of the pipeline for a simple Tx
 }
- 
+
 struct Record {
     /// a slice of Call, that is appended to
-    records: BufWriter<Tx>,
+    records: BufWriter<File>,
     height: usize,
 }
 
@@ -88,16 +95,21 @@ impl Record {
         let height = self.height;
         self.records.write_all(&blob);
         self.height += len;
-        // returns the hash of the blob 
+        // returns the hash of the blob
         return (hash, height);
     }
+}
+
+struct AllocatedPages {
+    page_allocations: BTreeMap<PublicKey, usize>,
+    free_pages: Vec<usize>,
 }
 
 struct PageTable {
     /// Vec<Page> over a large array of [Page]
     page_table: memmap::MmapMut,
     /// a map from page public keys, to index into the page_table
-    page_allocations: RwLock<std::collections::BTreeMap<PublicKey, usize>>,
+    page_allocations: RwLock<AllocatedPages>,
     mem_locks: Mutex<HashSet<PublicKey>>,
 }
 
@@ -120,11 +132,10 @@ struct PohEntry {
 impl PoH {
     /// mix the offset into the stream
     pub fn new(num_hashes: u64) -> Self {
-        PoH {num_hashes}
+        PoH { num_hashes }
     }
     pub fn insert(&mut self, record_hash: Hash, record_index: u64) {
         self.sender.send((record_hash, record_index));
-
     }
     //separate thread calls this
     pub fn generator(&self) {
@@ -145,11 +156,12 @@ impl PoH {
                 self.hash += 1;
             }
             let entry = PoHEntry {
-               poh_hash: self.hash,
-               record_index: record_index,
+                poh_hash: self.hash,
+                record_index: record_index,
             };
             self.writer.write(&entry);
-            self.bytes += size_of(entry);
+            self.bytes += size_of::<PoHEntry>();
+        }
     }
     pub fn bytes(&self) -> usize {
         self.bytes
