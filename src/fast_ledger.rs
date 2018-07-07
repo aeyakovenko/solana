@@ -1,4 +1,6 @@
-use hasht;
+use std::io::{BufWriter};
+use std::mem::size_of;
+use std::sync::mpsc::{Receiver, Sender};
 use memmap;
 
 //dummy defs
@@ -70,33 +72,9 @@ struct Tx {
     destination: PublicKey, //simple defintion that makes it easy to define the rest of the pipeline for a simple Tx
 }
  
-/// simple single memory hashtable implementation
-impl hasht::Key for PublicKey {
-    fn start(&self) -> usize {
-        self[0]
-            | (self[1] << (1 * 8))
-            | (self[2] << (2 * 8))
-            | (self[3] << (3 * 8))
-            | (self[4] << (4 * 8))
-            | (self[5] << (5 * 8))
-            | (self[6] << (6 * 8))
-            | (self[7] << (7 * 8))
-    }
-    fn unused(&self) -> bool {
-        *self == 0usize
-    }
-}
-
-impl hasht::Val<PublicKey> for Page {
-    fn key(&self) -> &PublicKey {
-        &self.owner
-    }
-}
-type PageT = hasht::HashT<PublicKey, Page>;
-
 struct Record {
     /// a slice of Call, that is appended to
-    records: BufWriter,
+    records: BufWriter<Tx>,
     height: usize,
 }
 
@@ -124,7 +102,7 @@ struct PageTable {
 }
 
 struct PoH {
-    poh: BufWriter,
+    poh: BufWriter<PoHEntry>,
     sender: Sender<(Hash, u64)>,
     receiver: Receiver<(Hash, u64)>,
     hash: Hash,
