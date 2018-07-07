@@ -16,7 +16,7 @@ struct StateMachine {
 }
 
 /// Generic Page for the PageTable
-#[crepr]
+#[repr(C)]
 struct Page {
     /// key that indexes this page
     /// proove ownership of this key to spend from this Page
@@ -28,6 +28,7 @@ struct Page {
     balance: u64,
     /// hash of the page data
     memhash: Hash,
+    /// The following could be in a separate structure
     /// size of the page
     size: u64,
     /// when signing this is 0
@@ -36,7 +37,7 @@ struct Page {
 }
 
 /// Call definition
-#[crepr]
+#[repr(C)]
 struct Call {
     /// proof of `caller` key owndershp over the whole structure
     signature: Signature,
@@ -63,7 +64,7 @@ struct Call {
 /// simple transaction over a Call
 /// TODO: The pipeline will need to pass the `destination` public keys in a side buffer to generalize
 /// this
-#[crepr]
+#[repr(C)]
 struct Tx {
     call: Call, //inkeys = 1, numspends = 1, numproofs = 0
     destination: PublicKey, //simple defintion that makes it easy to define the rest of the pipeline for a simple Tx
@@ -115,45 +116,65 @@ impl Record {
 }
 
 struct PageTable {
-    /// HashT over a large array of [Page]
+    /// Vec<Page> over a large array of [Page]
     page_table: memmap::MmapMut,
-    table_lock: RwLock<bool>,
+    /// a map from page public keys, to index into the page_table
+    page_allocations: RwLock<std::collections::BTreeMap<PublicKey, usize>>,
     mem_locks: Mutex<HashSet<PublicKey>>,
 }
 
 struct PoH {
     poh: BufWriter,
+    sender: Sender<(Hash, u64)>,
+    receiver: Receiver<(Hash, u64)>,
     hash: Hash,
     height: usize,
-    dummy_current: Hash,
 }
 
 /// Points to indexes into the Record structure
-#[crepr]
+#[repr(C)]
 struct PohEntry {
     poh_hash: Hash,
-    /// when 0, this means its an empty entry
+    /// when current == previous, this means its an empty entry
     record_index: u64,
-    number_of_txs: u64,
 }
 
 impl PoH {
     /// mix the offset into the stream
-    pub fn insert(&mut self, record_hash: Hash, record_index: u64, number_of_txs: u64) {
-        // lock memory
-        // fake poh for now, mix in `record_hash` for actual PoH
-        self.hash += 1;
-        // store the offset to file
-        let entry = self.poh.get_mut(self.height);
-        *entry = PoHEntry {
-            poh_hash: self.hash,
-            record_index: record_index,
-            number_of_txs: number_of_txs,
-        };
-        self.height += 1;
+    pub fn new(num_hashes: u64) -> Self {
+        PoH {num_hashes}
     }
-    pub fn height(&self) -> usize {
-        self.height
+    pub fn insert(&mut self, record_hash: Hash, record_index: u64) {
+        self.sender.send((record_hash, record_index));
+
+    }
+    //separate thread calls this
+    pub fn generator(&self) {
+        let mut last_record_index = 0;
+        loop {
+            //TODO: check if this slower then a Mutex<VecDeque>
+            let input = self.receiver.try_recv();
+            let mut mixin_hash = 0;
+            if let Some(in_hash, in_index) = input {
+                mixin_hash = in_hash;
+                last_record_index = in_index;
+            } else {
+                mixin_hash = 0; //or last?
+            }
+            for _ in self.num_hashes {
+                // do the sha256 loop now, with mixin_hash as the seed
+                // fake poh for now, mix in `mixin_hash` for actual PoH
+                self.hash += 1;
+            }
+            let entry = PoHEntry {
+               poh_hash: self.hash,
+               record_index: record_index,
+            };
+            self.writer.write(&entry);
+            self.bytes += size_of(entry);
+    }
+    pub fn bytes(&self) -> usize {
+        self.bytes
     }
 }
 
