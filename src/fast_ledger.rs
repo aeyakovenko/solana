@@ -32,6 +32,8 @@ pub struct Page {
     contract: PublicKey,
     /// balance that belongs to owner
     balance: u64,
+    /// version of the structure
+    version: u64,
     /// hash of the page data
     memhash: Hash,
     /// The following could be in a separate structure
@@ -47,6 +49,7 @@ impl Default for Page {
             owner: 0,
             contract: 0,
             balance: 0,
+            version: 0,
             memhash: 0,
             size: 0,
             pointer: 0,
@@ -66,6 +69,9 @@ pub struct Call {
     amount: u64,
     /// OS scheduling fee
     fee: u64,
+    /// struct version to prevent duplicate spends
+    /// Calls with a version <= Page.version are rejected
+    version: u64,
     /// method to call in the contract
     method: u8,
     /// number of keys to load, aka the to key
@@ -192,6 +198,9 @@ impl PageTable {
             if let Some(memix) = allocated_pages.lookup(&tx.call.owner) {
                 if let Some(page) = self.page_table.get(memix) {
                     assert_eq!(page.owner, tx.call.owner);
+                    if page.version >= tx.call.version {
+                        continue;
+                    }
                     if page.balance >= tx.call.fee + tx.call.amount {
                         from_pages[i] = Some(memix);
                     }
@@ -228,6 +237,7 @@ impl PageTable {
                 owner: key,
                 contract: tx.call.contract,
                 balance: amount,
+                version: 0,
                 size: 0,
                 pointer: 0,
                 memhash: 0,
@@ -278,6 +288,7 @@ impl PageTable {
             let page = Page {
                 owner: tx.destination,
                 contract: tx.call.contract,
+                version: 0,
                 balance: 0,
                 size: 0,
                 pointer: 0,
@@ -307,6 +318,7 @@ impl PageTable {
                 {
                     let from = &mut self.page_table[fix];
                     from.balance -= tx.call.amount + tx.call.fee;
+                    from.version = tx.call.version;
                 }
                 {
                     let to = &mut self.page_table[tix];
@@ -316,11 +328,20 @@ impl PageTable {
         }
     }
     pub fn get_balance(&self, key: &PublicKey) -> Option<u64> {
+        //todo does this hold the lock through the map?
         self.allocated_pages
             .read()
             .unwrap()
             .lookup(key)
             .map(|dx| self.page_table[dx].balance)
+    }
+    pub fn get_version(&self, key: &PublicKey) -> Option<u64> {
+        //todo does this hold the lock through the map?
+        self.allocated_pages
+            .read()
+            .unwrap()
+            .lookup(key)
+            .map(|dx| self.page_table[dx].version)
     }
     fn _load_memory(
         &self,
@@ -465,6 +486,7 @@ mod test {
                 signature: 0,
                 owner: rand::thread_rng().next_u64(),
                 contract: rand::thread_rng().next_u64(),
+                version: 1,
                 amount: 1,
                 fee: 1,
                 method: 0,
@@ -524,6 +546,22 @@ mod test {
         pt.validate_debits(&transactions, &lock, &mut from_pages);
         for x in &from_pages {
             assert!(x.is_some());
+        }
+    }
+    #[test]
+    fn validate_debits_low_version() {
+        let mut pt = PageTable::new();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        pt.force_allocate(&transactions, true, 1_000_000);
+        let mut lock = vec![false; N];
+        let mut from_pages = vec![None; N];
+        pt.acquire_memory_lock(&transactions, &mut lock);
+        for tx in &mut transactions {
+            tx.call.version = 0;
+        }
+        pt.validate_debits(&transactions, &lock, &mut from_pages);
+        for x in &from_pages {
+            assert!(x.is_none());
         }
     }
     #[test]
@@ -612,6 +650,7 @@ mod test {
             assert!(to_pages[i].is_some());
             assert!(from_pages[i].is_some());
             assert_eq!(pt.get_balance(&x.destination), Some(x.call.amount));
+            assert_eq!(pt.get_version(&x.call.owner), Some(x.call.version));
             assert_eq!(
                 pt.get_balance(&x.call.owner),
                 Some(10 - (x.call.amount + x.call.fee))
@@ -635,6 +674,7 @@ mod bench {
                 signature: 0,
                 owner: rand::thread_rng().next_u64(),
                 contract: rand::thread_rng().next_u64(),
+                version: 1,
                 amount: 1,
                 fee: 1,
                 method: 0,
@@ -648,11 +688,23 @@ mod bench {
         }
     }
     #[bench]
+    fn bench_update_version(bencher: &mut Bencher) {
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        bencher.iter(move || {
+            for tx in &mut transactions {
+                tx.call.version += 1;
+            }
+        });
+    }
+    #[bench]
     fn bench_mem_lock(bencher: &mut Bencher) {
         let pt = PageTable::new();
-        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         bencher.iter(move || {
             let mut lock = vec![false; N];
+            for tx in &mut transactions {
+                tx.call.version += 1;
+            }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.release_memory_lock(&transactions, &lock);
         });
@@ -662,10 +714,13 @@ mod bench {
         let mut pt = PageTable::new();
         let fill_table: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&fill_table, true, 1_000_000);
-        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         bencher.iter(move || {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
+            for tx in &mut transactions {
+                tx.call.version += 1;
+            }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
             pt.release_memory_lock(&transactions, &lock);
@@ -674,11 +729,14 @@ mod bench {
     #[bench]
     fn bench_validate_debits_hit(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
-        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
         bencher.iter(move || {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
+            for tx in &mut transactions {
+                tx.call.version += 1;
+            }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
             pt.release_memory_lock(&transactions, &lock);
@@ -687,12 +745,15 @@ mod bench {
     #[bench]
     fn bench_find_new_keys_all(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
-        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
         bencher.iter(move || {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
+            for tx in &mut transactions {
+                tx.call.version += 1;
+            }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
             pt.find_new_keys(&transactions, &from_pages, &mut to_pages);
@@ -702,13 +763,16 @@ mod bench {
     #[bench]
     fn bench_find_new_keys_none(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
-        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
         pt.force_allocate(&transactions, false, 1_000_000);
         bencher.iter(move || {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
+            for tx in &mut transactions {
+                tx.call.version += 1;
+            }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
             pt.find_new_keys(&transactions, &from_pages, &mut to_pages);
@@ -718,12 +782,15 @@ mod bench {
     #[bench]
     fn bench_allocate_new_keys_all(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
-        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
         bencher.iter(move || {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
+            for tx in &mut transactions {
+                tx.call.version += 1;
+            }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
             pt.find_new_keys(&transactions, &from_pages, &mut to_pages);
@@ -734,13 +801,16 @@ mod bench {
     #[bench]
     fn bench_allocate_new_keys_none(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
-        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
         pt.force_allocate(&transactions, false, 1_000_000);
         bencher.iter(move || {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
+            for tx in &mut transactions {
+                tx.call.version += 1;
+            }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
             pt.find_new_keys(&transactions, &from_pages, &mut to_pages);
@@ -751,18 +821,46 @@ mod bench {
     #[bench]
     fn bench_move_funds(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
-        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
         bencher.iter(move || {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
+            for tx in &mut transactions {
+                tx.call.version += 1;
+            }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
             pt.find_new_keys(&transactions, &from_pages, &mut to_pages);
             pt.allocate_keys(&transactions, &from_pages, &mut to_pages);
             pt.move_funds(&transactions, &mut from_pages, &mut to_pages);
             pt.release_memory_lock(&transactions, &lock);
+        });
+    }
+    #[bench]
+    fn bench_move_funds_random(bencher: &mut Bencher) {
+        let mut pt = PageTable::new();
+        let mut ttx: Vec<Vec<_>> = (0..N)
+            .map(|_| (0..N).map(|_r| random_tx()).collect())
+            .collect();
+        for transactions in &ttx {
+            pt.force_allocate(transactions, true, 1_000_000);
+        }
+        bencher.iter(move || {
+            let transactions = &mut ttx[rand::thread_rng().next_u64() as usize % N];
+            let mut lock = vec![false; N];
+            let mut from_pages = vec![None; N];
+            let mut to_pages = vec![None; N];
+            for tx in transactions.iter_mut() {
+                tx.call.version += 1;
+            }
+            pt.acquire_memory_lock(transactions, &mut lock);
+            pt.validate_debits(transactions, &lock, &mut from_pages);
+            pt.find_new_keys(transactions, &from_pages, &mut to_pages);
+            pt.allocate_keys(transactions, &from_pages, &mut to_pages);
+            pt.move_funds(transactions, &mut from_pages, &mut to_pages);
+            pt.release_memory_lock(transactions, &lock);
         });
     }
 }
