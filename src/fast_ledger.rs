@@ -296,6 +296,6 @@ impl StateMachine {
     }
     fn output(&self, blob: &Vec<Tx>) {
         let (hash, pos) = self.record.insert(blob);
-        self.poh.insert(hash, pos, blob.len());
+        self.poh.insert(hash, pos as u64);
     }
 }
