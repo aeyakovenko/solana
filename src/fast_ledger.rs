@@ -1,4 +1,5 @@
 use bincode::serialize;
+use result::Result;
 use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -10,11 +11,11 @@ type Hash = u64;
 type PublicKey = u64;
 type Signature = u64;
 
-struct StateMachine {
+pub struct StateMachine {
     /// append only array of Call structures
     record: Record,
     /// state machine for transactions and contract memory
-    page_table: PageTable,
+    _page_table: PageTable,
     /// append only array of PohEntry structures
     poh: PoH,
 }
@@ -22,7 +23,7 @@ struct StateMachine {
 /// Generic Page for the PageTable
 #[repr(C)]
 #[derive(Clone)]
-struct Page {
+pub struct Page {
     /// key that indexes this page
     /// proove ownership of this key to spend from this Page
     owner: PublicKey,
@@ -42,9 +43,8 @@ struct Page {
 }
 
 /// Call definition
-#[repr(C)]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-struct Call {
+pub struct Call {
     /// proof of `caller` key owndershp over the whole structure
     signature: Signature,
     /// caller address, aka from in a simple transaction
@@ -66,7 +66,7 @@ struct Call {
     /// number of proofs of ownership of `inkeys`, `caller` is proven by the signature
     num_proofs: u8,
     /// Sender appends an array of PublicKeys, Signature, and key indexies of size `numproofs`
-    /// {Call,[PublicKey; inkeys],[userdata],[Sig; num_proofs],[u8; num_proofs]}
+    /// {Call,[PublicKey; inkeys],[Sig; num_proofs],[u8; num_proofs],[userdata]}
     /// unused
     unused: [u8; 3],
 }
@@ -74,14 +74,13 @@ struct Call {
 /// simple transaction over a Call
 /// TODO: The pipeline will need to pass the `destination` public keys in a side buffer to generalize
 /// this
-#[repr(C)]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-struct Tx {
+pub struct Tx {
     call: Call,             //inkeys = 1, numspends = 1, numproofs = 0
     destination: PublicKey, //simple defintion that makes it easy to define the rest of the pipeline for a simple Tx
 }
 
-struct Record {
+pub struct Record {
     /// a slice of Call, that is appended to
     records: BufWriter<File>,
     height: usize,
@@ -90,16 +89,16 @@ struct Record {
 impl Record {
     /// write a blob to the record, and return the hash of the blob and the index at which it was
     /// inserted into the record
-    pub fn insert(&self, blob: &Vec<Tx>) -> (Hash, u64) {
+    pub fn insert(&mut self, blob: &Vec<Tx>) -> Result<(Hash, u64)> {
         let len = blob.len();
         //TODO: compute real hash
         let hash = self.height;
         let height = self.height;
         let bytes = serialize(&blob).unwrap();
-        self.records.write(&bytes);
+        self.records.write(&bytes)?;
         self.height += len;
         // returns the hash of the blob
-        return (hash as Hash, height as u64);
+        return Ok((hash as Hash, height as u64));
     }
 }
 
@@ -108,7 +107,15 @@ struct AllocatedPages {
     allocated: BTreeMap<PublicKey, u64>,
     free: Vec<u64>,
 }
+
 impl AllocatedPages {
+    pub fn new() -> Self {
+        AllocatedPages {
+            max: 0,
+            allocated: BTreeMap::new(),
+            free: vec![],
+        }
+    }
     pub fn lookup(&self, key: &PublicKey) -> Option<u64> {
         self.allocated.get(key).cloned()
     }
@@ -130,8 +137,8 @@ impl AllocatedPages {
         page
     }
 }
-struct PageTable {
-    /// Vec<Page> over a large array of [Page]
+
+pub struct PageTable {
     page_table: Vec<Page>,
     /// a map from page public keys, to index into the page_table
     allocated_pages: RwLock<AllocatedPages>,
@@ -139,7 +146,14 @@ struct PageTable {
 }
 
 impl PageTable {
-    fn acquire_memory_lock(&self, packet: &Vec<Tx>, acquired_memory: &mut Vec<bool>) {
+    pub fn new() -> Self {
+        PageTable {
+            page_table: vec![],
+            allocated_pages: RwLock::new(AllocatedPages::new()),
+            mem_locks: Mutex::new(HashSet::new()),
+        }
+    }
+    pub fn acquire_memory_lock(&self, packet: &Vec<Tx>, acquired_memory: &mut Vec<bool>) {
         //holds mem_locks mutex
         let mut mem_locks = self.mem_locks.lock().unwrap();
         for (i, p) in packet.iter().enumerate() {
@@ -152,7 +166,7 @@ impl PageTable {
             }
         }
     }
-    fn validate_debits<'a>(
+    pub fn validate_debits<'a>(
         &'a self,
         packet: &Vec<Tx>,
         acquired_memory: &Vec<bool>,
@@ -175,11 +189,11 @@ impl PageTable {
             }
         }
     }
-    fn find_new_keys<'a>(
+    pub fn find_new_keys<'a>(
         &'a self,
         packet: &Vec<Tx>,
         from_pages: &Vec<Option<&Page>>,
-        to_pages: &Vec<Option<&'a mut Page>>,
+        to_pages: &mut Vec<Option<&'a Page>>,
     ) {
         //holds READ lock to the page table
         let allocated_pages = self.allocated_pages.read().unwrap();
@@ -189,20 +203,50 @@ impl PageTable {
                 continue;
             }
             if let Some(memix) = allocated_pages.lookup(&tx.destination) {
-                if let Some(m) = self.page_table.get_mut(memix as usize) {
+                if let Some(m) = self.page_table.get(memix as usize) {
                     to_pages[i] = Some(m);
                 }
             }
         }
     }
-    fn allocate_keys(
+    #[cfg(test)]
+    pub fn from_allocate(&mut self, packet: &Vec<Tx>, caller: bool) {
+        let mut allocated_pages = self.allocated_pages.write().unwrap();
+        for tx in packet.iter() {
+            let key = if caller {
+                tx.call.caller
+            } else {
+                tx.destination
+            };
+            let amount = if caller {
+                tx.call.amount + tx.call.fee
+            } else {
+                0
+            };
+            let page = Page {
+                owner: key,
+                contract: tx.call.contract,
+                balance: amount,
+                size: 0,
+                pointer: 0,
+                memhash: 0,
+            };
+            let ix = allocated_pages.allocate(key) as usize;
+            if self.page_table.len() <= ix {
+                self.page_table.resize(ix + 1, page);
+            } else {
+                self.page_table[ix] = page;
+            }
+        }
+    }
+    pub fn allocate_keys(
         &mut self,
         packet: &Vec<Tx>,
         from_pages: &Vec<Option<&Page>>,
-        to_pages: &Vec<Option<&Page>>,
+        to_pages: &mut Vec<Option<&Page>>,
     ) {
         //holds WRITE lock to the page table
-        let allocated_pages = self.allocated_pages.write().unwrap();
+        let mut allocated_pages = self.allocated_pages.write().unwrap();
         //while we hold the write lock, this is where we can create another anonymouns page
         //with copy and write, and send this table to the vote signer
         for (i, tx) in packet.iter().enumerate() {
@@ -228,23 +272,19 @@ impl PageTable {
             }
         }
     }
-    fn move_funds(
+    pub fn move_funds(
         &mut self,
         packet: &Vec<Tx>,
-        from_pages: &Vec<Option<&mut Page>>,
-        to_pages: &Vec<Option<&mut Page>>,
+        from_pages: &mut Vec<Option<&mut Page>>,
+        to_pages: &mut Vec<Option<&mut Page>>,
     ) {
         //holds page table read lock
         let _allocated_pages = self.allocated_pages.read().unwrap();
         for (i, tx) in packet.iter().enumerate() {
-            if from_pages[i].is_none() {
-                continue;
+            if let (Some(ref mut from), Some(ref mut to)) = (&mut from_pages[i], &mut to_pages[i]) {
+                from.balance -= tx.call.amount;
+                to.balance += tx.call.amount;
             }
-            if to_pages[i].is_none() {
-                continue;
-            }
-            from_pages[i].unwrap().balance -= tx.call.amount;
-            to_pages[i].unwrap().balance += tx.call.amount;
         }
     }
     fn _load_memory(
@@ -271,16 +311,40 @@ impl PageTable {
     ) {
         //TBD
     }
-    fn release_memory_lock(&self, packet: &Vec<Tx>) {
+    pub fn release_memory_lock(&self, packet: &Vec<Tx>, lock: &Vec<bool>) {
         //holds mem_locks mutex
         let mut mem_locks = self.mem_locks.lock().unwrap();
-        for p in packet.iter() {
+        for (i, p) in packet.iter().enumerate() {
+            if !lock[i] {
+                continue;
+            }
             mem_locks.remove(&p.call.caller);
             mem_locks.remove(&p.destination);
         }
     }
+    /// fill up to the blob
+    pub fn fill_blob(
+        packet: &Vec<Tx>,
+        from_pages: &Vec<Option<&Page>>,
+        to_pages: &Vec<Option<&Page>>,
+        blob: &mut Vec<Tx>,
+        filled: &mut usize,
+    ) {
+        //nolock
+        for (i, tx) in packet.iter().enumerate() {
+            if from_pages[i].is_none() || to_pages[i].is_none() {
+                continue;
+            }
+            blob[*filled] = tx.clone();
+            *filled += 1;
+            if *filled == blob.len() {
+                return;
+            }
+        }
+    }
 }
-struct PoH {
+
+pub struct PoH {
     /// number of hashes to produce for each entry
     num_hashes: u64,
     poh_file: BufWriter<File>,
@@ -288,13 +352,13 @@ struct PoH {
     sender: Sender<(Hash, u64)>,
     receiver: Receiver<(Hash, u64)>,
     hash: Hash,
-    height: usize,
+    entries_written: usize,
 }
 
 /// Points to indexes into the Record structure
 #[repr(C)]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-struct PohEntry {
+pub struct PohEntry {
     /// hash produced by PoH process
     poh_hash: Hash,
     /// when current == previous, this means its an empty entry
@@ -303,11 +367,12 @@ struct PohEntry {
 
 impl PoH {
     /// mix in the hash and record offset into the poh_file
-    pub fn insert(&mut self, record_hash: Hash, record_index: u64) {
-        self.sender.send((record_hash, record_index));
+    pub fn insert(&mut self, record_hash: Hash, record_index: u64) -> Result<()> {
+        self.sender.send((record_hash, record_index))?;
+        Ok(())
     }
     //separate thread calls this
-    pub fn generator(&self) {
+    pub fn generator(&mut self) -> Result<()> {
         let mut last_record_index = 0;
         loop {
             //TODO: check if this slower then a Mutex<VecDeque>
@@ -334,8 +399,10 @@ impl PoH {
             };
             let bytes = serialize(&entry).unwrap();
             self.bytes_written += bytes.len();
-            self.poh_file.write(&bytes);
+            self.entries_written += 1;
+            self.poh_file.write(&bytes)?;
         }
+        Ok(())
     }
     pub fn bytes_written(&self) -> usize {
         self.bytes_written
@@ -343,28 +410,47 @@ impl PoH {
 }
 
 impl StateMachine {
-    /// fill up to the blob
-    fn fill_blob(
-        &self,
-        packet: &Vec<Tx>,
-        has_funds: &Vec<bool>,
-        blob: &mut Vec<Tx>,
-        filled: &mut usize,
-    ) {
-        //nolock
-        for (i, tx) in packet.iter().enumerate() {
-            if !has_funds[i] {
-                continue;
-            }
-            blob[*filled] = *tx;
-            *filled += 1;
-            if *filled == blob.len() {
-                return;
-            }
-        }
+    pub fn output(&mut self, blob: &Vec<Tx>) -> Result<()> {
+        let (hash, pos) = self.record.insert(blob)?;
+        self.poh.insert(hash, pos as u64)?;
+        Ok(())
     }
-    fn output(&self, blob: &Vec<Tx>) {
-        let (hash, pos) = self.record.insert(blob);
-        self.poh.insert(hash, pos as u64);
+}
+
+#[cfg(all(feature = "unstable", test))]
+mod bench {
+    extern crate test;
+    use self::test::Bencher;
+    use fast_ledger::{Call, PageTable, Tx};
+    use rand;
+    use rand::RngCore;
+    #[bench]
+    fn bench_fast_ledger(bencher: &mut Bencher) {
+        let mut pt = PageTable::new();
+        const N: usize = 1_000;
+        let transactions: Vec<_> = (0..N)
+            .map(|r| Tx {
+                call: Call {
+                    signature: 0,
+                    caller: rand::thread_rng().next_u64(),
+                    contract: rand::thread_rng().next_u64(),
+                    amount: 1,
+                    fee: 0,
+                    method: 0,
+                    inkeys: 1,
+                    num_userdata: 0,
+                    num_spends: 1,
+                    num_proofs: 0,
+                    unused: [0u8; 3],
+                },
+                destination: rand::thread_rng().next_u64(),
+            })
+            .collect();
+        bencher.iter(move || {
+            let mut lock = vec![false; N];
+            pt.acquire_memory_lock(&transactions, &mut lock);
+            pt.release_memory_lock(&transactions, &lock);
+        });;
+
     }
 }
