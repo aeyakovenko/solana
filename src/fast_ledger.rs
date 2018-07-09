@@ -114,9 +114,9 @@ impl Record {
 }
 
 pub struct AllocatedPages {
-    max: u64,
-    allocated: BTreeMap<PublicKey, u64>,
-    free: Vec<u64>,
+    max: usize,
+    allocated: BTreeMap<PublicKey, usize>,
+    free: Vec<usize>,
 }
 
 impl AllocatedPages {
@@ -127,15 +127,15 @@ impl AllocatedPages {
             free: vec![],
         }
     }
-    pub fn lookup(&self, key: &PublicKey) -> Option<u64> {
-        self.allocated.get(key).cloned()
+    pub fn lookup(&self, key: &PublicKey) -> Option<usize> {
+        self.allocated.get(key).cloned().map(|x| x as usize)
     }
     pub fn free(&mut self, key: &PublicKey) {
         let page = self.lookup(key).unwrap();
         self.free.push(page);
         self.allocated.remove(key);
     }
-    pub fn allocate(&mut self, key: PublicKey) -> u64 {
+    pub fn allocate(&mut self, key: PublicKey) -> usize {
         let page = if let Some(p) = self.free.pop() {
             p
         } else {
@@ -180,7 +180,7 @@ impl PageTable {
         &mut self,
         packet: &Vec<Tx>,
         acquired_memory: &Vec<bool>,
-        from_pages: &mut Vec<Option<*mut Page>>,
+        from_pages: &mut Vec<Option<usize>>,
     ) {
         //holds page table READ lock
         let allocated_pages = self.allocated_pages.read().unwrap();
@@ -190,10 +190,10 @@ impl PageTable {
                 continue;
             }
             if let Some(memix) = allocated_pages.lookup(&tx.call.owner) {
-                let mem = self.page_table.get_mut(memix as usize);
-                if let Some(m) = mem {
-                    if m.balance >= tx.call.fee + tx.call.amount {
-                        from_pages[i] = Some(m as *mut Page);
+                if let Some(page) = self.page_table.get(memix) {
+                    assert_eq!(page.owner, tx.call.owner);
+                    if page.balance >= tx.call.fee + tx.call.amount {
+                        from_pages[i] = Some(memix);
                     }
                 }
             }
@@ -202,8 +202,8 @@ impl PageTable {
     pub fn find_new_keys(
         &mut self,
         packet: &Vec<Tx>,
-        from_pages: &Vec<Option<*mut Page>>,
-        to_pages: &mut Vec<Option<*mut Page>>,
+        from_pages: &Vec<Option<usize>>,
+        to_pages: &mut Vec<Option<usize>>,
     ) {
         //holds READ lock to the page table
         let allocated_pages = self.allocated_pages.read().unwrap();
@@ -212,11 +212,7 @@ impl PageTable {
             if from_pages[i].is_none() {
                 continue;
             }
-            if let Some(memix) = allocated_pages.lookup(&tx.destination) {
-                if let Some(m) = self.page_table.get_mut(memix as usize) {
-                    to_pages[i] = Some(m as *mut Page);
-                }
-            }
+            to_pages[i] = allocated_pages.lookup(&tx.destination);
         }
     }
     #[cfg(test)]
@@ -248,41 +244,27 @@ impl PageTable {
     pub fn check_pages(
         &self,
         txs: &Vec<Tx>,
-        from_pages: &Vec<Option<*mut Page>>,
-        to_pages: &Vec<Option<*mut Page>>,
+        from_pages: &Vec<Option<usize>>,
+        to_pages: &Vec<Option<usize>>,
     ) {
         //while we hold the write lock, this is where we can create another anonymouns page
         //with copy and write, and send this table to the vote signer
         for (i, tx) in txs.iter().enumerate() {
             if from_pages[i].is_some() {
-                assert_eq!(
-                    from_pages[i].unwrap() as *const Page,
-                    &self.page_table[self.allocated_pages
-                                         .read()
-                                         .unwrap()
-                                         .lookup(&tx.call.owner)
-                                         .unwrap() as usize] as *const Page
-                );
+                assert_eq!(tx.call.owner, self.page_table[from_pages[i].unwrap()].owner);
             }
             if to_pages[i].is_some() {
-                assert_eq!(
-                    to_pages[i].unwrap() as *const Page,
-                    &self.page_table[self.allocated_pages
-                                         .read()
-                                         .unwrap()
-                                         .lookup(&tx.destination)
-                                         .unwrap() as usize] as *const Page
-                );
+                assert_eq!(tx.destination, self.page_table[to_pages[i].unwrap()].owner);
             }
         }
     }
     pub fn allocate_keys(
         &mut self,
         packet: &Vec<Tx>,
-        from_pages: &Vec<Option<*mut Page>>,
-        to_pages: &mut Vec<Option<*mut Page>>,
+        from_pages: &Vec<Option<usize>>,
+        to_pages: &mut Vec<Option<usize>>,
     ) {
-        //holds WRITE lock to the page table
+        //holds WRITE lock to the page table, since we are adding keys and resizing the table here
         let mut allocated_pages = self.allocated_pages.write().unwrap();
         //while we hold the write lock, this is where we can create another anonymouns page
         //with copy and write, and send this table to the vote signer
@@ -303,54 +285,64 @@ impl PageTable {
             };
             let ix = allocated_pages.allocate(tx.destination) as usize;
             if self.page_table.len() <= ix {
+                trace!("reallocating page table {}", ix);
+                //this may reallocate the page_table, that is one of the reasons why we need to hold the write lock
                 self.page_table.resize(ix + 1, Page::default());
             }
             self.page_table[ix] = page;
-            to_pages[i] = Some(&mut self.page_table[ix] as *mut Page);
+            to_pages[i] = Some(ix);
         }
     }
     pub fn move_funds(
         &mut self,
         packet: &Vec<Tx>,
-        from_pages: &mut Vec<Option<*mut Page>>,
-        to_pages: &mut Vec<Option<*mut Page>>,
+        from_pages: &mut Vec<Option<usize>>,
+        to_pages: &mut Vec<Option<usize>>,
     ) {
         //holds page table read lock
+        //this will prevent anyone from resizing the table
         let _allocated_pages = self.allocated_pages.read().unwrap();
         for (i, tx) in packet.iter().enumerate() {
-            if let (Some(from), Some(to)) = (from_pages[i], to_pages[i]) {
-                unsafe {
-                    //todo: only move fee here, move the amount as part of `num_spends`
-                    (*from).balance -= tx.call.amount + tx.call.fee;
-                    assert_eq!((*from).balance, 8);
-                    assert_eq!((*from).owner, tx.call.owner);
-                    assert_eq!((*to).owner, tx.destination);
-                    (*to).balance += tx.call.amount;
+            if let (Some(fix), Some(tix)) = (from_pages[i], to_pages[i]) {
+                {
+                    let from = &mut self.page_table[fix];
+                    from.balance -= tx.call.amount + tx.call.fee;
+                }
+                {
+                    let to = &mut self.page_table[tix];
+                    to.balance += tx.call.amount;
                 }
             }
         }
     }
+    pub fn get_balance(&self, key: &PublicKey) -> Option<u64> {
+        self.allocated_pages
+            .read()
+            .unwrap()
+            .lookup(key)
+            .map(|dx| self.page_table[dx].balance)
+    }
     fn _load_memory(
         &self,
         _packet: &Vec<Tx>,
-        _from_pages: &Vec<Option<&Page>>,
-        _to_pages: &Vec<Option<&Page>>,
+        _from_pages: &Vec<Option<usize>>,
+        _to_pages: &Vec<Option<usize>>,
     ) {
         //TBD
     }
     fn _execute_call(
         &self,
         _packet: &Vec<Tx>,
-        _from_pages: &Vec<Option<&Page>>,
-        _to_pages: &Vec<Option<&Page>>,
+        _from_pages: &Vec<Option<usize>>,
+        _to_pages: &Vec<Option<usize>>,
     ) {
         //TBD
     }
     fn _write_memory(
         &self,
         _packet: &Vec<Tx>,
-        _from_pages: &Vec<Option<&Page>>,
-        _to_pages: &Vec<Option<&Page>>,
+        _from_pages: &Vec<Option<usize>>,
+        _to_pages: &Vec<Option<usize>>,
     ) {
         //TBD
     }
@@ -462,6 +454,7 @@ impl StateMachine {
 #[cfg(test)]
 mod test {
     use fast_ledger::{Call, PageTable, Tx};
+    use logger;
     use rand;
     use rand::RngCore;
     const N: usize = 2;
@@ -599,6 +592,7 @@ mod test {
     }
     #[test]
     fn move_funds() {
+        logger::setup();
         let mut pt = PageTable::new();
         let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 10);
@@ -607,30 +601,20 @@ mod test {
         let mut to_pages = vec![None; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
         pt.validate_debits(&transactions, &lock, &mut from_pages);
-        pt.check_pages(&transactions, &to_pages, &from_pages);
+        pt.check_pages(&transactions, &from_pages, &to_pages);
         pt.find_new_keys(&transactions, &from_pages, &mut to_pages);
-        pt.check_pages(&transactions, &to_pages, &from_pages);
+        pt.check_pages(&transactions, &from_pages, &to_pages);
         pt.allocate_keys(&transactions, &from_pages, &mut to_pages);
-        pt.check_pages(&transactions, &to_pages, &from_pages);
+        pt.check_pages(&transactions, &from_pages, &to_pages);
         pt.move_funds(&transactions, &mut from_pages, &mut to_pages);
-        pt.check_pages(&transactions, &to_pages, &from_pages);
+        pt.check_pages(&transactions, &from_pages, &to_pages);
         for (i, x) in transactions.iter().enumerate() {
             assert!(to_pages[i].is_some());
             assert!(from_pages[i].is_some());
-            let dx: u64 = pt.allocated_pages
-                .read()
-                .unwrap()
-                .lookup(&x.destination)
-                .unwrap();
-            assert_eq!(pt.page_table[dx as usize].balance, x.call.amount);
-            let sx: u64 = pt.allocated_pages
-                .read()
-                .unwrap()
-                .lookup(&x.call.owner)
-                .unwrap();
+            assert_eq!(pt.get_balance(&x.destination), Some(x.call.amount));
             assert_eq!(
-                pt.page_table[sx as usize].balance,
-                10 - (x.call.amount + x.call.fee)
+                pt.get_balance(&x.call.owner),
+                Some(10 - (x.call.amount + x.call.fee))
             );
         }
     }
