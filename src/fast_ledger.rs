@@ -7,9 +7,9 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Mutex, RwLock};
 
 //dummy defs
-type Hash = u64;
-type PublicKey = u64;
-type Signature = u64;
+type Hash = [u64; 4];
+type PublicKey = [u64; 4];
+type Signature = [u64; 8];
 
 pub struct StateMachine {
     /// append only array of Call structures
@@ -46,11 +46,11 @@ pub struct Page {
 impl Default for Page {
     fn default() -> Page {
         Page {
-            owner: 0,
-            contract: 0,
+            owner: [0, 0, 0, 0],
+            contract: [0, 0, 0, 0],
             balance: 0,
             version: 0,
-            memhash: 0,
+            memhash: [0, 0, 0, 0],
             size: 0,
             pointer: 0,
         }
@@ -109,13 +109,13 @@ impl Record {
     pub fn insert(&mut self, blob: &Vec<Tx>) -> Result<(Hash, u64)> {
         let len = blob.len();
         //TODO: compute real hash
-        let hash = self.height;
+        let hash = [self.height as u64, 0, 0, 0];
         let height = self.height;
         let bytes = serialize(&blob).unwrap();
         self.records.write(&bytes)?;
         self.height += len;
         // returns the hash of the blob
-        return Ok((hash as Hash, height as u64));
+        return Ok((hash, height as u64));
     }
 }
 
@@ -240,7 +240,7 @@ impl PageTable {
                 version: 0,
                 size: 0,
                 pointer: 0,
-                memhash: 0,
+                memhash: [0, 0, 0, 0],
             };
             let ix = allocated_pages.allocate(key) as usize;
             if self.page_table.len() <= ix {
@@ -292,7 +292,7 @@ impl PageTable {
                 balance: 0,
                 size: 0,
                 pointer: 0,
-                memhash: 0,
+                memhash: [0, 0, 0, 0],
             };
             let ix = allocated_pages.allocate(tx.destination) as usize;
             if self.page_table.len() <= ix {
@@ -440,14 +440,15 @@ impl PoH {
             } else {
                 //TODO:  should we keep the last value for the record index to indicate 0 bytes
                 //have been added to the record at this point?
-                mixin_hash = 0; //or last?
+                mixin_hash = [0, 0, 0, 0]; //or last?
                 last_record_index = 0; //or last
             }
-            self.hash += mixin_hash;
+            // fake PoH mixin
+            self.hash[0] += mixin_hash[0];
             for _ in 0..self.num_hashes {
                 // do the sha256 loop now, with mixin_hash as the seed
                 // fake poh for now, mix in `mixin_hash` for actual PoH
-                self.hash += 1;
+                self.hash[0] += 1;
             }
             let entry = PohEntry {
                 poh_hash: self.hash,
@@ -480,12 +481,17 @@ mod test {
     use rand::RngCore;
     const N: usize = 2;
 
+    fn rand4() -> [u64; 4] {
+        let mut r = rand::thread_rng();
+        [r.next_u64(), r.next_u64(), r.next_u64(), r.next_u64()]
+    }
     fn random_tx() -> Tx {
+        assert_ne!(rand4(), rand4());
         Tx {
             call: Call {
-                signature: 0,
-                owner: rand::thread_rng().next_u64(),
-                contract: rand::thread_rng().next_u64(),
+                signature: [0; 8],
+                owner: rand4(),
+                contract: rand4(),
                 version: 1,
                 amount: 1,
                 fee: 1,
@@ -496,7 +502,7 @@ mod test {
                 num_proofs: 0,
                 unused: [0u8; 3],
             },
-            destination: rand::thread_rng().next_u64(),
+            destination: rand4(),
         }
     }
     #[test]
@@ -667,13 +673,17 @@ mod bench {
     use rand;
     use rand::RngCore;
     const N: usize = 256;
-
+    fn rand4() -> [u64; 4] {
+        let mut r = rand::thread_rng();
+        [r.next_u64(), r.next_u64(), r.next_u64(), r.next_u64()]
+    }
     fn random_tx() -> Tx {
+        assert_ne!(rand4(), rand4());
         Tx {
             call: Call {
-                signature: 0,
-                owner: rand::thread_rng().next_u64(),
-                contract: rand::thread_rng().next_u64(),
+                signature: [0; 8],
+                owner: rand4(),
+                contract: rand4(),
                 version: 1,
                 amount: 1,
                 fee: 1,
@@ -684,7 +694,7 @@ mod bench {
                 num_proofs: 0,
                 unused: [0u8; 3],
             },
-            destination: rand::thread_rng().next_u64(),
+            destination: rand4(),
         }
     }
     #[bench]
