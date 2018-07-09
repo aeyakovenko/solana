@@ -446,18 +446,18 @@ mod test {
         let mut lock = vec![false; N];
         let mut lock2 = vec![false; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
-        for x in lock.into_iter() {
-            assert!(x);
+        for x in &lock {
+            assert!(!*x);
         }
         pt.acquire_memory_lock(&transactions, &mut lock2);
-        for x in lock2.into_iter() {
-            assert!(!x);
+        for x in &lock2 {
+            assert!(!*x);
         }
         pt.release_memory_lock(&transactions, &lock);
 
         pt.acquire_memory_lock(&transactions, &mut lock2);
-        for x in lock2.into_iter() {
-            assert!(x);
+        for x in &lock2 {
+            assert!(!*x);
         }
         pt.release_memory_lock(&transactions, &lock2);
     }
