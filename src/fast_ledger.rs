@@ -266,6 +266,7 @@ impl PageTable {
             } else {
                 self.page_table[ix] = page;
             }
+            to_pages[i] = Some(&mut self.page_table[ix] as *mut Page);
         }
     }
     pub fn move_funds(
@@ -419,7 +420,7 @@ mod test {
     use fast_ledger::{Call, PageTable, Tx};
     use rand;
     use rand::RngCore;
-    const N: usize = 256;
+    const N: usize = 2;
 
     fn random_tx() -> Tx {
         Tx {
@@ -440,14 +441,14 @@ mod test {
         }
     }
     #[test]
-    fn test_mem_lock() {
+    fn mem_lock() {
         let pt = PageTable::new();
         let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         let mut lock = vec![false; N];
         let mut lock2 = vec![false; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
         for x in &lock {
-            assert!(!*x);
+            assert!(*x);
         }
         pt.acquire_memory_lock(&transactions, &mut lock2);
         for x in &lock2 {
@@ -457,7 +458,7 @@ mod test {
 
         pt.acquire_memory_lock(&transactions, &mut lock2);
         for x in &lock2 {
-            assert!(!*x);
+            assert!(*x);
         }
         pt.release_memory_lock(&transactions, &lock2);
     }
@@ -500,7 +501,7 @@ mod test {
         pt.validate_debits(&transactions, &lock, &mut from_pages);
         pt.find_new_keys(&transactions, &from_pages, &mut to_pages);
         for x in &to_pages {
-            assert!(x.is_some());
+            assert!(x.is_none());
         }
     }
     #[test]
@@ -516,7 +517,7 @@ mod test {
         pt.validate_debits(&transactions, &lock, &mut from_pages);
         pt.find_new_keys(&transactions, &from_pages, &mut to_pages);
         for x in &to_pages {
-            assert!(x.is_none());
+            assert!(x.is_some());
         }
     }
     #[test]
