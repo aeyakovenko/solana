@@ -454,10 +454,24 @@ mod bench {
         });;
     }
     #[bench]
-    fn bench_fast_validate_debits(bencher: &mut Bencher) {
+    fn bench_fast_validate_debits_miss(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
         const N: usize = 256;
         let transactions: Vec<_> = (0..N).map(|r| random_tx()).collect();
+        bencher.iter(move || {
+            let mut lock = vec![false; N];
+            let mut from_pages = vec![None; N];
+            pt.acquire_memory_lock(&transactions, &mut lock);
+            pt.validate_debits(&transactions, &lock, &mut from_pages);
+            pt.release_memory_lock(&transactions, &lock);
+        });;
+    }
+    #[bench]
+    fn bench_fast_validate_debits_hit(bencher: &mut Bencher) {
+        let mut pt = PageTable::new();
+        const N: usize = 256;
+        let transactions: Vec<_> = (0..N).map(|r| random_tx()).collect();
+        pt.from_allocate(&transactions, true);
         bencher.iter(move || {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
