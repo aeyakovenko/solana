@@ -182,7 +182,7 @@ impl PageTable {
             if let Some(memix) = allocated_pages.lookup(&tx.call.caller) {
                 let mem = self.page_table.get(memix as usize);
                 if let Some(m) = mem {
-                    if m.balance > tx.call.amount {
+                    if m.balance > tx.call.fee + tx.call.amount {
                         from_pages[i] = Some(m);
                     }
                 }
@@ -424,33 +424,46 @@ mod bench {
     use fast_ledger::{Call, PageTable, Tx};
     use rand;
     use rand::RngCore;
+    fn random_tx() -> Tx {
+        Tx {
+            call: Call {
+                signature: 0,
+                caller: rand::thread_rng().next_u64(),
+                contract: rand::thread_rng().next_u64(),
+                amount: 1,
+                fee: 0,
+                method: 0,
+                inkeys: 1,
+                num_userdata: 0,
+                num_spends: 1,
+                num_proofs: 0,
+                unused: [0u8; 3],
+            },
+            destination: rand::thread_rng().next_u64(),
+        }
+    }
     #[bench]
-    fn bench_fast_ledger(bencher: &mut Bencher) {
+    fn bench_fast_ledger_mem_lock(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
-        const N: usize = 1_000;
-        let transactions: Vec<_> = (0..N)
-            .map(|r| Tx {
-                call: Call {
-                    signature: 0,
-                    caller: rand::thread_rng().next_u64(),
-                    contract: rand::thread_rng().next_u64(),
-                    amount: 1,
-                    fee: 0,
-                    method: 0,
-                    inkeys: 1,
-                    num_userdata: 0,
-                    num_spends: 1,
-                    num_proofs: 0,
-                    unused: [0u8; 3],
-                },
-                destination: rand::thread_rng().next_u64(),
-            })
-            .collect();
+        const N: usize = 256;
+        let transactions: Vec<_> = (0..N).map(|r| random_tx()).collect();
         bencher.iter(move || {
             let mut lock = vec![false; N];
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.release_memory_lock(&transactions, &lock);
         });;
-
+    }
+    #[bench]
+    fn bench_fast_validate_debits(bencher: &mut Bencher) {
+        let mut pt = PageTable::new();
+        const N: usize = 256;
+        let transactions: Vec<_> = (0..N).map(|r| random_tx()).collect();
+        bencher.iter(move || {
+            let mut lock = vec![false; N];
+            let mut from_pages = vec![None; N];
+            pt.acquire_memory_lock(&transactions, &mut lock);
+            pt.validate_debits(&transactions, &lock, &mut from_pages);
+            pt.release_memory_lock(&transactions, &lock);
+        });;
     }
 }
