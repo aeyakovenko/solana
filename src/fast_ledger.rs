@@ -7,6 +7,8 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Mutex, RwLock};
 
 //dummy defs
+//these types vs just u64 had a 40% impact on perf, it might make sense to do our own hash function
+//for HashSet BTreeMap
 type Hash = [u64; 4];
 type PublicKey = [u64; 4];
 type Signature = [u64; 8];
