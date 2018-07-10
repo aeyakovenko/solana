@@ -840,7 +840,7 @@ mod bench {
         });
     }
     #[bench]
-    fn bench_move_funds_random(bencher: &mut Bencher) {
+    fn bench_move_funds_large_table(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
         let mut ttx: Vec<Vec<_>> = (0..N)
             .map(|_| (0..N).map(|_r| random_tx()).collect())
