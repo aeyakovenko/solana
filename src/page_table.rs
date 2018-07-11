@@ -52,9 +52,7 @@ pub fn SYSTEM_0_realloc(call: &Call,
                         pages: &mut Vec<Page>,
                         user_data: Vec<u8>) {
     let size = deserialize(user_data).unwrap();
-    if pages[0].balance >= size {
-        pages[0].memory.resize(size);
-    }
+    pages[0].memory.resize(size);
 }
 /// method 1
 /// assign
