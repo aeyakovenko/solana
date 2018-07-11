@@ -31,6 +31,7 @@
 /// it can make.
 /// 3. `Page` entry is similar to an `Account`, but it also has a `contract` that owns it.  That
 ///    tag allows the contract to Write to the memory owned by the page.  Contracts can spend money
+use bincode::deserialize;
 use rand::{thread_rng, Rng};
 use std::collections::{BTreeMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
@@ -43,14 +44,42 @@ type Signature = [u64; 8];
 
 const DEFAULT_CONTRACT: [u64;4] = [0u64;4];
 
-/// DEFAULT_CONTRACT method 0
+/// SYSTEM interface, same for very contract, methods 0 to 127
+/// method 0
+/// reallocate
 /// spend the funds from the call to the first recepient
-pub fn move_funds(call: &Call,
-                  mems: Vec<&mut Page>,
-                  spends: &mut Vec<u64>) {
-    spends[1] = call.amount;
+pub fn SYSTEM_0_realloc(call: &Call,
+                        pages: &mut Vec<Page>,
+                        user_data: Vec<u8>) {
+    let size = deserialize(user_data).unwrap();
+    if pages[0].balance >= size {
+        pages[0].memory.resize(size);
+    }
+}
+/// method 1
+/// assign
+/// reasign the page to a different contract
+pub fn SYSTEM_1_assign(call: &Call,
+                       pages: &mut Vec<Page>,
+                       user_data: Vec<u8>) {
+    let contract = deserialize(user_data).unwrap();
+    if call.contract == DEFAULT_CONTRACT || pages[0].contract == call.contract {
+        pages[0].contract = contract;
+    }
+}
+/// DEFAULT_CONTRACT interface
+/// All contracts start with 128
+/// method 128
+/// move_funds
+/// spend the funds from the call to the first recepient
+pub fn DEFAULT_CONTRACT_128_move_funds(call: &Call,
+                  pages: &mut Vec<Page>,
+                  user_data: Vec<u8>) {
+    let amount = deserialize(user_data).unwrap();
+    pages[0].balance -= amount;
+    pages[1].balance += amount;
 } 
-
+ 
 //157,173 ns/iter vs 125,791 ns/iter with using this hasher, 110,000 ns with u64 as the key
 struct FastHasher {
     //generates some seeds to pluck bytes out of the keys
@@ -139,12 +168,9 @@ pub struct Page {
     /// hash of the page data
     memhash: Hash,
     /// The following could be in a separate structure
-    /// size of the page
-    size: u64,
-    /// when signing this is 0
-    /// this is the pointer to allocated memory on the system for this page
-    pointer: u64,
+    memory: Vec<u8>,
 }
+
 impl Default for Page {
     fn default() -> Page {
         Page {
@@ -153,24 +179,31 @@ impl Default for Page {
             balance: 0,
             version: 0,
             memhash: [0, 0, 0, 0],
-            size: 0,
-            pointer: 0,
+            memory: vec![],
         }
     }
 }
 /// Call definition
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Call {
-    /// proof of `caller` key owndershp over the whole structure
-    signature: Signature,
+
+    /// Signatures and Keys
+    /// proofs[0] is the signature
+    /// number of proofs of ownership of `inkeys`, `owner` is proven by the signature
+    proofs: Vec<Option<Signature>>, 
+    /// number of keys to load, aka the to key
+    /// inkeys[0] is the caller's key
+    inkeys: Vec<PublicKey>,
+
+    /// PoH data
+    /// last id PoH observed by the sender
     last_id: u64,
-    last_hash: Hash,
-    /// owner address, aka from in a simple transaction
-    caller: PublicKey,
+    /// last PoH hash observed by the sender
+    last_hash: Hash, 
+ 
+    /// Program
     /// the address of the program we want to call
     contract: PublicKey,
-    /// amount to send to the contract
-    amount: u64,
     /// OS scheduling fee
     fee: u64,
     /// struct version to prevent duplicate spends
@@ -178,12 +211,8 @@ pub struct Call {
     version: u64,
     /// method to call in the contract
     method: u8,
-    /// number of keys to load, aka the to key
-    inkeys: Vec<PublicKey>,
-    /// number of proofs of ownership of `inkeys`, `owner` is proven by the signature
-    proofs: Vec<Signature>,
     /// usedata in bytes
-    userdata: Vec<u8>,
+    user_data: Vec<u8>,
 }
 
 /// simple transaction over a Call
@@ -196,13 +225,13 @@ impl struct Call {
             last_id: last_id,
             last_hash: last_hash,
             caller: from,
+            inkeys: vec![to],
+            proofs: vec![],
             contract: [0; 8],
             amount: amount,
             fee: fee,
             version: version,
-            inkeys: vec![to],
-            proofs: vec![],
-            userdata: vec![],
+            user_data: vec![],
         }
     }
 }
@@ -289,6 +318,10 @@ impl PageTable {
                 if let Some(page) = self.page_table.get(memix) {
                     assert_eq!(page.owner, tx.call.caller);
                     if page.version >= tx.call.version {
+                        continue;
+                    }
+                    // from pages must belong to the contract
+                    if page.contract != tx.call.contract {
                         continue;
                     }
                     if page.balance >= tx.call.fee + tx.call.amount {
@@ -407,8 +440,7 @@ impl PageTable {
         for (i,tx) in packet.iter().enumerate() {
             load_pages[i] = None;
             if let (Some(fix), true) = (from_pages[i], to_pages[i].len() == tx.inkeys.len()) {
-                let to_mems_ptrs: Vec<*mut Page> = vec![&mut self.page_table[fix] as *mut Page];
-                to_mems.extend(to_pages[i].iter().map(|ix| &mut self.page_table[ix] as *mut Page));  
+                let to_mems = to_pages[i].iter().map(|ix| &mut self.page_table[ix] as *mut Page);  
                 let mem_refs = unsafe {
                     to_mem_ptrs.map(|x| x as &mut Page).collect()
                 }
@@ -422,27 +454,64 @@ impl PageTable {
         // Pass the _allocated_pages argument to make sure the lock is held for this call
         _allocated_pages: &AllocatedPages,
         packet: &Vec<Call>,
-        load_pages: &Vec<Option<(Vec<&mut Page>)>>,
+        loaded_page_table: &Vec<Option<(Vec<&mut Page>)>>,
     ) {
-        packet.iter().zip(&load_pages).into_par_iter().map(|(tx, pages)| {
-            if let Some(pages) = maybe_pages {
+        packet.iter().zip(&loaded_page_table).into_par_iter().map(|(tx, maybe_pages)| {
+            if let Some(loaded_pages) = maybe_pages {
                 // Spend the fee first
-                let spends = vec![0; pages.len()];
-                pages[0].balance -= tx.fee;
+                loaded_pages[0].balance -= tx.fee;
+                let pre_call_total_spendable = loaded_pages.map(|(page,proof)| {
+                    if page.contract == tx.contract {
+                        page.balance;
+                    }
+                }).sum();
+
+                let pre_call_total_unspendable = loaded_pages.map(|(page,proof)| {
+                    if page.contract != tx.contract {
+                        page.balance;
+                    }
+                }).sum(); 
+                let pre_call_total = pre_call_total_spendable + pre_call_total_unspendable;
+
+                // TODO(anatoly): Load actual memory
+ 
+                let call_pages = loaded_pages.cloned().collect();
                 // Find the method
                 match (tx.contract, tx.method) {
-                    (DEFAULT_CONTRACT,0) => move_funds(&tx, pages, &mut spends), 
-                    (c,m) => warn!("unknown contract and method {:x} {:x}", c,m),
+                    // system interface
+                    // everyone has the same reallocate
+                    (_,0) => DEFAULT_CONTRACT_0_realloc(&tx, call_pages, tx.user_data), 
+                    (_,1) => DEFAULT_CONTRACT_1_assign(&tx, call_pages, tx.user_data), 
+                    // contract methods
+                    (DEFAULT_CONTRACT,128) => DEFAULT_CONTRACT_1_move_funds(&tx, call_pages, tx.user_data), 
+                    (contract,method) => warn!("unknown contract and method {:x} {:x}", contract,method),
                 };
-		        // TODO(anatoly): Pages owned by the contract are
-		        // Read/Write, pages not owned by the contract are
+
+		        // TODO(anatoly): Verify Memory
+                // Pages owned by the contract are Read/Write,
+                // pages not owned by the contract are
 		        // Read only.  Code should verify memory integrity or
 		        // verify contract bytecode.
                 
-                // If the method spent all the coin, send it to all the keys
-                if spends.sum() == call.amount  {
-                    for (i,s) in spends.iter().enumerate() {
-                        pages[i].balance += s;
+                // verify tokens
+                let after_call_total_spendable = call_pages.map(|(page,proof)| {
+                    if page.contract == tx.contract {
+                        page.balance;
+                    }
+                }).sum();
+                let after_call_total_unspendable = call_pages.map(|page| {
+                    if page.contract != tx.contract {
+                        page.balance;
+                    }
+                }).sum();  
+                let after_call_total = after_call_total_spendable + after_call_total_unspendable;
+
+                //commit
+                if after_call_total == pre_call_total {
+                    if after_call_total_spendable == pre_call_total_spendable {
+                        loaded_pages.zip(call_pages).map(|load,call| {
+                            *load = call;
+                        });
                     }
                 }
             }
@@ -560,7 +629,7 @@ mod test {
                 fee: 1,
                 method: 0,
                 inkeys: 1,
-                num_userdata: 0,
+                num_user_data: 0,
                 num_spends: 1,
                 num_proofs: 0,
                 unused: [0u8; 3],
@@ -752,7 +821,7 @@ mod bench {
                 fee: 1,
                 method: 0,
                 inkeys: 1,
-                num_userdata: 0,
+                num_user_data: 0,
                 num_spends: 1,
                 num_proofs: 0,
                 unused: [0u8; 3],
