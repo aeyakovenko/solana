@@ -58,12 +58,12 @@ pub fn SYSTEM_0_realloc(call: &Call,
 }
 /// method 1
 /// assign
-/// reasign the page to a different contract
+/// assign the page to a contract
 pub fn SYSTEM_1_assign(call: &Call,
                        pages: &mut Vec<Page>,
                        user_data: Vec<u8>) {
     let contract = deserialize(user_data).unwrap();
-    if call.contract == DEFAULT_CONTRACT || pages[0].contract == call.contract {
+    if call.contract == DEFAULT_CONTRACT && pages[0].contract == DEFAULT_CONTRACT {
         pages[0].contract = contract;
     }
 }
