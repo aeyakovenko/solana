@@ -31,7 +31,7 @@
 /// it can make.
 /// 3. `Page` entry is similar to an `Account`, but it also has a `contract` that owns it.  That
 ///    tag allows the contract to Write to the memory owned by the page.  Contracts can spend money
-use bincode::deserialize;
+use bincode::{deserialize, serialize};
 use rand::{thread_rng, Rng};
 use std::collections::{BTreeMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
@@ -42,26 +42,23 @@ type Hash = [u64; 4];
 type PublicKey = [u64; 4];
 type Signature = [u64; 8];
 
-const DEFAULT_CONTRACT: [u64;4] = [0u64;4];
+const DEFAULT_CONTRACT: [u64; 4] = [0u64; 4];
 
 /// SYSTEM interface, same for very contract, methods 0 to 127
 /// method 0
 /// reallocate
 /// spend the funds from the call to the first recepient
-pub fn SYSTEM_0_realloc(call: &Call,
-                        pages: &mut Vec<Page>,
-                        user_data: Vec<u8>) {
-    let size = deserialize(user_data).unwrap();
-    pages[0].memory.resize(size);
+pub fn SYSTEM_0_realloc(call: &Call, pages: &mut Vec<Page>, user_data: Vec<u8>) {
+    // TODO(anatoly): add a stage to cleanup any pages that do not hold enough balance for the size
+    // of the page
+    pages[0].memory.resize(size, 0u8);
 }
 /// method 1
 /// assign
 /// assign the page to a contract
-pub fn SYSTEM_1_assign(call: &Call,
-                       pages: &mut Vec<Page>,
-                       user_data: Vec<u8>) {
-    let contract = deserialize(user_data).unwrap();
-    if call.contract == DEFAULT_CONTRACT && pages[0].contract == DEFAULT_CONTRACT {
+pub fn SYSTEM_1_assign(call: &Call, pages: &mut Vec<Page>, user_data: Vec<u8>) {
+    let contract = deserialize(&user_data).unwrap();
+    if call.contract == DEFAULT_CONTRACT || pages[0].contract == call.contract {
         pages[0].contract = contract;
     }
 }
@@ -70,14 +67,12 @@ pub fn SYSTEM_1_assign(call: &Call,
 /// method 128
 /// move_funds
 /// spend the funds from the call to the first recepient
-pub fn DEFAULT_CONTRACT_128_move_funds(call: &Call,
-                  pages: &mut Vec<Page>,
-                  user_data: Vec<u8>) {
-    let amount = deserialize(user_data).unwrap();
+pub fn DEFAULT_CONTRACT_128_move_funds(call: &Call, pages: &mut Vec<Page>, user_data: Vec<u8>) {
+    let amount: u64 = deserialize(&user_data).unwrap();
     pages[0].balance -= amount;
     pages[1].balance += amount;
-} 
- 
+}
+
 //157,173 ns/iter vs 125,791 ns/iter with using this hasher, 110,000 ns with u64 as the key
 struct FastHasher {
     //generates some seeds to pluck bytes out of the keys
@@ -184,21 +179,20 @@ impl Default for Page {
 /// Call definition
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Call {
-
     /// Signatures and Keys
     /// proofs[0] is the signature
     /// number of proofs of ownership of `inkeys`, `owner` is proven by the signature
-    proofs: Vec<Option<Signature>>, 
+    proofs: Vec<Option<Signature>>,
     /// number of keys to load, aka the to key
     /// inkeys[0] is the caller's key
-    inkeys: Vec<PublicKey>,
+    keys: Vec<PublicKey>,
 
     /// PoH data
     /// last id PoH observed by the sender
     last_id: u64,
     /// last PoH hash observed by the sender
-    last_hash: Hash, 
- 
+    last_hash: Hash,
+
     /// Program
     /// the address of the program we want to call
     contract: PublicKey,
@@ -216,20 +210,26 @@ pub struct Call {
 /// simple transaction over a Call
 /// TODO: The pipeline will need to pass the `destination` public keys in a side buffer to generalize
 /// this
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-impl struct Call {
-    pub fn new_tx(from: PublicKey, last_id: u64, last_hash: Hash, amount: u64, fee: u64, version: u64, to: PublicKey) {
+impl Call {
+    pub fn new_tx(
+        from: PublicKey,
+        last_id: u64,
+        last_hash: Hash,
+        amount: u64,
+        fee: u64,
+        version: u64,
+        to: PublicKey,
+    ) -> Self {
         Call {
+            proofs: vec![],
+            keys: vec![from, to],
             last_id: last_id,
             last_hash: last_hash,
-            caller: from,
-            inkeys: vec![to],
-            proofs: vec![],
-            contract: [0; 8],
-            amount: amount,
+            contract: DEFAULT_CONTRACT,
+            method: 0,
             fee: fee,
             version: version,
-            user_data: vec![],
+            user_data: serialize(&amount).unwrap(),
         }
     }
 }
@@ -287,43 +287,52 @@ impl PageTable {
             mem_locks: Mutex::new(HashSet::with_hasher(FastHasher::new())),
         }
     }
+    // for each call in the packet acquire the memory lock for the pages it references if possible
     pub fn acquire_memory_lock(&self, packet: &Vec<Call>, acquired_memory: &mut Vec<bool>) {
         //holds mem_locks mutex
         let mut mem_locks = self.mem_locks.lock().unwrap();
-        for (i, p) in packet.iter().enumerate() {
-            let collision = mem_locks.contains(&p.call.caller) || mem_locks.contains(&p.destination);
-            acquired_memory[i] = !collision;
-            if !collision {
-                mem_locks.insert(p.call.caller);
-                mem_locks.insert(p.destination);
+        for (i, tx) in packet.iter().enumerate() {
+            let collision: u64 = tx.keys
+                .iter()
+                .map({ |k| mem_locks.contains(k) as u64 })
+                .sum();
+            acquired_memory[i] = collision != 0;
+            if collision != 0 {
+                tx.keys.into_iter().map({ |k| mem_locks.insert(k) });
             }
         }
     }
+    // validate that we can process the fee
     pub fn validate_debits(
         &mut self,
         packet: &Vec<Call>,
         acquired_memory: &Vec<bool>,
-        from_pages: &mut Vec<Option<usize>>,
+        from_pages: &mut Vec<bool>,
     ) {
         //holds page table READ lock
         let allocated_pages = self.allocated_pages.read().unwrap();
         for (i, tx) in packet.iter().enumerate() {
-            from_pages[i] = None;
+            from_pages[i] = false;
             if !acquired_memory[i] {
                 continue;
             }
-            if let Some(memix) = allocated_pages.lookup(&tx.call.caller) {
+            let caller = &tx.keys[0];
+            if let Some(memix) = allocated_pages.lookup(caller) {
                 if let Some(page) = self.page_table.get(memix) {
-                    assert_eq!(page.owner, tx.call.caller);
-                    if page.version >= tx.call.version {
+                    assert_eq!(page.owner, *caller);
+                    // skip calls that are to old
+                    // this check prevents retransmitted transactions from being processed
+                    // the client must increase the tx.versoin to be greater than the
+                    // page_table[keys[0]].version
+                    if page.version >= tx.version {
                         continue;
                     }
-                    // from pages must belong to the contract
-                    if page.contract != tx.call.contract {
+                    // pages must belong to the contract
+                    if page.contract != tx.contract {
                         continue;
                     }
-                    if page.balance >= tx.call.fee + tx.call.amount {
-                        from_pages[i] = Some(memix);
+                    if page.balance >= tx.fee {
+                        from_pages[i] = true;
                     }
                 }
             }
@@ -332,17 +341,21 @@ impl PageTable {
     pub fn find_new_keys(
         &mut self,
         packet: &Vec<Call>,
-        from_pages: &Vec<Option<usize>>,
-        to_pages: &mut Vec<Option<usize>>,
+        from_pages: &Vec<bool>,
+        needs_alloc: &mut Vec<bool>,
+        pages: &mut Vec<Vec<Option<usize>>>,
     ) {
         //holds READ lock to the page table
         let allocated_pages = self.allocated_pages.read().unwrap();
         for (i, tx) in packet.iter().enumerate() {
-            to_pages[i] = None;
-            if from_pages[i].is_none() {
+            if !from_pages[i] {
                 continue;
             }
-            to_pages[i] = allocated_pages.lookup(&tx.destination);
+            pages[i] = tx.keys.iter().map(|k| allocated_pages.lookup(k)).collect();
+            needs_alloc[i] = false;
+            pages[i].iter().map(|x| {
+                needs_alloc[i] |= x.is_none();
+            });
         }
     }
     #[cfg(test)]
@@ -382,7 +395,10 @@ impl PageTable {
         //with copy and write, and send this table to the vote signer
         for (i, tx) in txs.iter().enumerate() {
             if from_pages[i].is_some() {
-                assert_eq!(tx.call.caller, self.page_table[from_pages[i].unwrap()].owner);
+                assert_eq!(
+                    tx.call.caller,
+                    self.page_table[from_pages[i].unwrap()].owner
+                );
             }
             if to_pages[i].is_some() {
                 assert_eq!(tx.destination, self.page_table[to_pages[i].unwrap()].owner);
@@ -392,37 +408,44 @@ impl PageTable {
     pub fn allocate_keys(
         &mut self,
         packet: &Vec<Call>,
-        from_pages: &Vec<Option<usize>>,
-        to_pages: &mut Vec<Option<usize>>,
+        from_pages: &Vec<bool>,
+        needs_alloc: &Vec<bool>,
+        pages: &mut Vec<Vec<Option<usize>>>,
     ) {
         //holds WRITE lock to the page table, since we are adding keys and resizing the table here
         let mut allocated_pages = self.allocated_pages.write().unwrap();
         //while we hold the write lock, this is where we can create another anonymouns page
         //with copy and write, and send this table to the vote signer
         for (i, tx) in packet.iter().enumerate() {
-            if from_pages[i].is_none() {
+            if !from_pages[i] {
                 continue;
             }
-            if to_pages[i].is_some() {
+            if !needs_alloc[i] {
                 continue;
             }
-            let page = Page {
-                owner: tx.destination,
-                contract: tx.call.contract,
-                version: 0,
-                balance: 0,
-                size: 0,
-                pointer: 0,
-                memhash: [0, 0, 0, 0],
-            };
-            let ix = allocated_pages.allocate(tx.destination) as usize;
-            if self.page_table.len() <= ix {
-                trace!("reallocating page table {}", ix);
-                //this may reallocate the page_table, that is one of the reasons why we need to hold the write lock
-                self.page_table.resize(ix + 1, Page::default());
+            for (j, call_pages) in pages[i].iter_mut().enumerate() {
+                if call_pages.is_some() {
+                    continue;
+                }
+                let key = tx.keys[j];
+                let page = Page {
+                    owner: key,
+                    contract: tx.contract,
+                    version: 0,
+                    balance: 0,
+                    memhash: [0, 0, 0, 0],
+                    memory: vec![],
+                };
+                //safe to do while the WRITE lock is held
+                let ix = allocated_pages.allocate(key) as usize;
+                if self.page_table.len() <= ix {
+                    trace!("reallocating page table {}", ix);
+                    //safe to do while the WRITE lock is held
+                    self.page_table.resize(ix + 1, Page::default());
+                }
+                self.page_table[ix] = page;
+                *call_pages = Some(ix);
             }
-            self.page_table[ix] = page;
-            to_pages[i] = Some(ix);
         }
     }
 
@@ -430,21 +453,23 @@ impl PageTable {
         &mut self,
         // Pass the _allocated_pages argument to make sure the lock is held for this call
         _allocated_pages: &AllocatedPages,
-        packet: &Vec<Call>,
-        from_pages: &Vec<Option<usize>>,
-        to_pages: &Vec<Vec<usize>>,
-        load_pages: &mut Vec<Option<(Vec<&mut Page>)>>,
+        packet: &[Call],
+        pages: &Vec<Vec<Option<usize>>>,
+        load_pages: &mut Vec<Vec<&mut Page>>,
     ) {
-        for (i,tx) in packet.iter().enumerate() {
-            load_pages[i] = None;
-            if let (Some(fix), true) = (from_pages[i], to_pages[i].len() == tx.inkeys.len()) {
-                let to_mems = to_pages[i].iter().map(|ix| &mut self.page_table[ix] as *mut Page);  
-                let mem_refs = unsafe {
-                    to_mem_ptrs.map(|x| x as &mut Page).collect()
+        for (i, tx) in packet.iter().enumerate() {
+            for (j, oix) in pages[i].iter().enumerate() {
+                if let Some(ix) = oix {
+                    let ptr = &mut self.page_table[ix] as *mut Page;
+                    let free_ref = unsafe {
+                        // This unsafe decouples the liftime of the page from the page_table
+                        // this is safe todo while `_allocated_pages` READ lock is alive
+                        x as &mut Page
+                    };
+                    load_pages[i][j] = free_ref;
                 }
-                load_pages[i] = Some(mem_refs);
-            } 
-        };
+            }
+        }
     }
 
     /// parallel execution of contracts
@@ -454,80 +479,98 @@ impl PageTable {
         packet: &Vec<Call>,
         loaded_page_table: &Vec<Option<(Vec<&mut Page>)>>,
     ) {
-        packet.iter().zip(&loaded_page_table).into_par_iter().map(|(tx, maybe_pages)| {
-            if let Some(loaded_pages) = maybe_pages {
-                // Spend the fee first
-                loaded_pages[0].balance -= tx.fee;
-                let pre_call_total_spendable = loaded_pages.map(|(page,proof)| {
-                    if page.contract == tx.contract {
-                        page.balance;
-                    }
-                }).sum();
+        packet
+            .iter()
+            .zip(&loaded_page_table)
+            .into_par_iter()
+            .map(|(tx, maybe_pages)| {
+                if let Some(loaded_pages) = maybe_pages {
+                    // Spend the fee first
+                    loaded_pages[0].balance -= tx.fee;
+                    let pre_call_total_spendable = loaded_pages
+                        .map(|(page, proof)| {
+                            if page.contract == tx.contract {
+                                page.balance;
+                            }
+                        })
+                        .sum();
 
-                let pre_call_total_unspendable = loaded_pages.map(|(page,proof)| {
-                    if page.contract != tx.contract {
-                        page.balance;
-                    }
-                }).sum(); 
-                let pre_call_total = pre_call_total_spendable + pre_call_total_unspendable;
+                    let pre_call_total_unspendable = loaded_pages
+                        .map(|(page, proof)| {
+                            if page.contract != tx.contract {
+                                page.balance;
+                            }
+                        })
+                        .sum();
+                    let pre_call_total = pre_call_total_spendable + pre_call_total_unspendable;
 
-                // TODO(anatoly): Load actual memory
- 
-                let call_pages = loaded_pages.cloned().collect();
-                // Find the method
-                match (tx.contract, tx.method) {
-                    // system interface
-                    // everyone has the same reallocate
-                    (_,0) => DEFAULT_CONTRACT_0_realloc(&tx, call_pages, tx.user_data), 
-                    (_,1) => DEFAULT_CONTRACT_1_assign(&tx, call_pages, tx.user_data), 
-                    // contract methods
-                    (DEFAULT_CONTRACT,128) => DEFAULT_CONTRACT_1_move_funds(&tx, call_pages, tx.user_data), 
-                    (contract,method) => warn!("unknown contract and method {:x} {:x}", contract,method),
-                };
+                    // TODO(anatoly): Load actual memory
 
-		        // TODO(anatoly): Verify Memory
-                // Pages owned by the contract are Read/Write,
-                // pages not owned by the contract are
-		        // Read only.  Code should verify memory integrity or
-		        // verify contract bytecode.
-                
-                // verify tokens
-                let after_call_total_spendable = call_pages.map(|(page,proof)| {
-                    if page.contract == tx.contract {
-                        page.balance;
-                    }
-                }).sum();
-                let after_call_total_unspendable = call_pages.map(|page| {
-                    if page.contract != tx.contract {
-                        page.balance;
-                    }
-                }).sum();  
-                let after_call_total = after_call_total_spendable + after_call_total_unspendable;
+                    let call_pages = loaded_pages.cloned().collect();
+                    // Find the method
+                    match (tx.contract, tx.method) {
+                        // system interface
+                        // everyone has the same reallocate
+                        (_, 0) => SYSTEM_0_realloc(&tx, call_pages, tx.user_data),
+                        (_, 1) => SYSTEM_1_assign(&tx, call_pages, tx.user_data),
+                        // contract methods
+                        (DEFAULT_CONTRACT, 128) => {
+                            DEFAULT_CONTRACT_128_move_funds(&tx, call_pages, tx.user_data)
+                        }
+                        (contract, method) => {
+                            warn!("unknown contract and method {:x} {:x}", contract, method)
+                        }
+                    };
 
-                //commit
-                if after_call_total == pre_call_total {
-                    if after_call_total_spendable == pre_call_total_spendable {
-                        loaded_pages.zip(call_pages).map(|load,call| {
-                            *load = call;
-                        });
+                    // TODO(anatoly): Verify Memory
+                    // Pages owned by the contract are Read/Write,
+                    // pages not owned by the contract are
+                    // Read only.  Code should verify memory integrity or
+                    // verify contract bytecode.
+
+                    // verify tokens
+                    let after_call_total_spendable = call_pages
+                        .map(|(page, proof)| {
+                            if page.contract == tx.contract {
+                                page.balance;
+                            }
+                        })
+                        .sum();
+                    let after_call_total_unspendable = call_pages
+                        .map(|page| {
+                            if page.contract != tx.contract {
+                                page.balance;
+                            }
+                        })
+                        .sum();
+                    let after_call_total =
+                        after_call_total_spendable + after_call_total_unspendable;
+
+                    //commit
+                    if after_call_total == pre_call_total {
+                        if after_call_total_spendable == pre_call_total_spendable {
+                            loaded_pages.zip(call_pages).map(|load, call| {
+                                *load = call;
+                            });
+                        }
                     }
                 }
-            }
-        });
+            });
     }
 
     /// parallel execution of contracts
     /// first we load the pages, then we pass all the pages to `par_execute` function which can
     /// safely call them all in parallel
-    pub fn load_and_execute(&mut self, 
+    pub fn load_and_execute(
+        &mut self,
         packet: &Vec<Call>,
         from_pages: &Vec<Option<usize>>,
         to_pages: &Vec<Vec<usize>>,
         load_pages: &mut Vec<Option<(Vec<&mut Page>)>>,
     ) {
         let allocated_pages = self.allocated_pages.read().unwrap();
-        self.load_pages(&allocated_pages, packet, from_pages, to_pages, load_pages); 
-        Self::par_execute(&allocated_pages, packet, load_pages); 
+        self.load_pages(&allocated_pages, packet, from_pages, to_pages, load_pages);
+        Self::par_execute(&allocated_pages, packet, load_pages);
     }
 
     pub fn get_balance(&self, key: &PublicKey) -> Option<u64> {
@@ -606,34 +649,19 @@ impl PageTable {
 #[cfg(test)]
 mod test {
     use logger;
-    use page_table::{Call, PageTable, Tx};
+    use page_table::{Call, PageTable};
     use rand;
     use rand::RngCore;
     const N: usize = 2;
 
-    fn rand4() -> [u64; 4] {
+    pub fn rand4() -> [u64; 4] {
         let mut r = rand::thread_rng();
         [r.next_u64(), r.next_u64(), r.next_u64(), r.next_u64()]
     }
-    fn random_tx() -> Tx {
+    pub fn random_tx() -> Call {
+        //sanity check
         assert_ne!(rand4(), rand4());
-        Tx {
-            call: Call {
-                signature: [0; 8],
-                owner: rand4(),
-                contract: rand4(),
-                version: 1,
-                amount: 1,
-                fee: 1,
-                method: 0,
-                inkeys: 1,
-                num_user_data: 0,
-                num_spends: 1,
-                num_proofs: 0,
-                unused: [0u8; 3],
-            },
-            destination: rand4(),
-        }
+        Call::new_tx(rand4(), 0, rand4(), 1, 1, 1, rand4())
     }
     #[test]
     fn mem_lock() {
@@ -693,7 +721,7 @@ mod test {
         let mut from_pages = vec![None; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
         for tx in &mut transactions {
-            tx.call.version = 0;
+            tx.version = 0;
         }
         pt.validate_debits(&transactions, &lock, &mut from_pages);
         for x in &from_pages {
@@ -799,40 +827,17 @@ mod test {
 mod bench {
     extern crate test;
     use self::test::Bencher;
-    use page_table::{Call, PageTable, Tx};
+    use page_table::test::random_tx;
+    use page_table::PageTable;
     use rand;
     use rand::RngCore;
     const N: usize = 256;
-    fn rand4() -> [u64; 4] {
-        let mut r = rand::thread_rng();
-        [r.next_u64(), r.next_u64(), r.next_u64(), r.next_u64()]
-    }
-    fn random_tx() -> Tx {
-        assert_ne!(rand4(), rand4());
-        Tx {
-            call: Call {
-                signature: [0; 8],
-                owner: rand4(),
-                contract: rand4(),
-                version: 1,
-                amount: 1,
-                fee: 1,
-                method: 0,
-                inkeys: 1,
-                num_user_data: 0,
-                num_spends: 1,
-                num_proofs: 0,
-                unused: [0u8; 3],
-            },
-            destination: rand4(),
-        }
-    }
     #[bench]
     fn bench_update_version(bencher: &mut Bencher) {
         let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         bencher.iter(move || {
             for tx in &mut transactions {
-                tx.call.version += 1;
+                tx.version += 1;
             }
         });
     }
@@ -843,7 +848,7 @@ mod bench {
         bencher.iter(move || {
             let mut lock = vec![false; N];
             for tx in &mut transactions {
-                tx.call.version += 1;
+                tx.version += 1;
             }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.release_memory_lock(&transactions, &lock);
@@ -859,7 +864,7 @@ mod bench {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
             for tx in &mut transactions {
-                tx.call.version += 1;
+                tx.version += 1;
             }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
@@ -875,7 +880,7 @@ mod bench {
             let mut lock = vec![false; N];
             let mut from_pages = vec![None; N];
             for tx in &mut transactions {
-                tx.call.version += 1;
+                tx.version += 1;
             }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
@@ -892,7 +897,7 @@ mod bench {
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
             for tx in &mut transactions {
-                tx.call.version += 1;
+                tx.version += 1;
             }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
@@ -911,7 +916,7 @@ mod bench {
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
             for tx in &mut transactions {
-                tx.call.version += 1;
+                tx.version += 1;
             }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
@@ -929,7 +934,7 @@ mod bench {
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
             for tx in &mut transactions {
-                tx.call.version += 1;
+                tx.version += 1;
             }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
@@ -949,7 +954,7 @@ mod bench {
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
             for tx in &mut transactions {
-                tx.call.version += 1;
+                tx.version += 1;
             }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
@@ -968,7 +973,7 @@ mod bench {
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
             for tx in &mut transactions {
-                tx.call.version += 1;
+                tx.version += 1;
             }
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_debits(&transactions, &lock, &mut from_pages);
@@ -993,7 +998,7 @@ mod bench {
             let mut from_pages = vec![None; N];
             let mut to_pages = vec![None; N];
             for tx in transactions.iter_mut() {
-                tx.call.version += 1;
+                tx.version += 1;
             }
             pt.acquire_memory_lock(transactions, &mut lock);
             pt.validate_debits(transactions, &lock, &mut from_pages);
