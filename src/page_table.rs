@@ -383,20 +383,22 @@ impl PageTable {
         }
     }
     #[cfg(test)]
-    pub fn check_pages(
+    pub fn sanity_check_pages(
         &self,
         txs: &Vec<Call>,
-        checked: &Vec<Option<usize>>,
-        to_pages: &Vec<Option<usize>>,
+        checked: &Vec<bool>,
+        to_pages: &Vec<Vec<Option<usize>>>,
     ) {
         //while we hold the write lock, this is where we can create another anonymouns page
         //with copy and write, and send this table to the vote signer
         for (i, tx) in txs.iter().enumerate() {
-            if checked[i].is_some() {
-                assert_eq!(tx.keys[0], self.page_table[checked[i].unwrap()].owner);
+            if checked[i] {
+                assert!(to_pages[i][0].is_some());
             }
-            if to_pages[i].is_some() {
-                assert_eq!(tx.keys[1], self.page_table[to_pages[i].unwrap()].owner);
+            for (p, k) in to_pages[i].iter().zip(&tx.keys) {
+                if p.is_some() {
+                    assert_eq!(*k, self.page_table[p.unwrap()].owner);
+                }
             }
         }
     }
@@ -525,7 +527,7 @@ impl PageTable {
                 }
                 // Spend the fee first
                 loaded_pages[0].balance -= tx.fee;
-                let mut call_pages: Vec<_> = loaded_pages.iter().map(|x| (*x).clone()).collect();
+                let mut call_pages: Vec<_> = loaded_pages.iter().map(|x| (*(*x)).clone()).collect();
                 let (pre_unspendable, pre_total) =
                     Self::calc_balance_limits(&tx, loaded_pages, &call_pages);
                 // TODO(anatoly): Load actual memory
@@ -641,8 +643,9 @@ impl PageTable {
 
 #[cfg(test)]
 mod test {
+    use bincode::deserialize;
     use logger;
-    use page_table::{Call, PageTable};
+    use page_table::{Call, Page, PageTable};
     use rand;
     use rand::RngCore;
     const N: usize = 2;
@@ -803,35 +806,49 @@ mod test {
             }
         }
     }
-    //    #[test]
-    //    fn move_funds() {
-    //        logger::setup();
-    //        let mut pt = PageTable::new();
-    //        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
-    //        pt.force_allocate(&transactions, true, 10);
-    //        let mut lock = vec![false; N];
-    //        let mut checked = vec![false; N];
-    //        let mut to_pages = vec![vec![None;N]; N];
-    //        pt.acquire_memory_lock(&transactions, &mut lock);
-    //        pt.validate_call(&transactions, &lock, &mut checked);
-    //        pt.check_pages(&transactions, &checked, &to_pages);
-    //        pt.find_new_keys(&transactions, &checked, &mut to_pages);
-    //        pt.check_pages(&transactions, &checked, &to_pages);
-    //        pt.allocate_keys(&transactions, &checked, &mut to_pages);
-    //        pt.check_pages(&transactions, &checked, &to_pages);
-    //        pt.move_funds(&transactions, &mut checked, &mut to_pages);
-    //        pt.check_pages(&transactions, &checked, &to_pages);
-    //        for (i, x) in transactions.iter().enumerate() {
-    //            assert!(to_pages[i].is_some());
-    //            assert!(checked[i].is_some());
-    //            assert_eq!(pt.get_balance(&x.destination), Some(x.call.amount));
-    //            assert_eq!(pt.get_version(&x.call.caller), Some(x.call.version));
-    //            assert_eq!(
-    //                pt.get_balance(&x.call.caller),
-    //                Some(10 - (x.call.amount + x.call.fee))
-    //            );
-    //        }
-    //    }
+    #[test]
+    fn load_and_execute() {
+        logger::setup();
+        let mut pt = PageTable::new();
+        let transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        pt.force_allocate(&transactions, true, 10);
+        let mut lock = vec![false; N];
+        let mut needs_alloc = vec![false; N];
+        let mut checked = vec![false; N];
+        let mut to_pages = vec![vec![None; N]; N];
+        let mut loaded_page_table: Vec<Vec<_>> = (0..N)
+            .map(|_| {
+                (0..N)
+                    .map(|_| unsafe {
+                        let ptr = 0xfefefefefefefe as *mut Page;
+                        &mut *ptr
+                    })
+                    .collect()
+            })
+            .collect();
+        pt.acquire_memory_lock(&transactions, &mut lock);
+        pt.validate_call(&transactions, &lock, &mut checked);
+        pt.sanity_check_pages(&transactions, &checked, &to_pages);
+        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
+        pt.sanity_check_pages(&transactions, &checked, &to_pages);
+        pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
+        pt.sanity_check_pages(&transactions, &checked, &to_pages);
+        pt.load_and_execute(
+            &transactions,
+            &mut checked,
+            &mut to_pages,
+            &mut loaded_page_table,
+        );
+        pt.sanity_check_pages(&transactions, &checked, &to_pages);
+        for (i, x) in transactions.iter().enumerate() {
+            assert!(checked[i]);
+            let amount: u64 = deserialize(&x.user_data).unwrap();
+            assert_eq!(pt.get_balance(&x.keys[1]), Some(amount));
+            assert_eq!(pt.get_version(&x.keys[1]), Some(0));
+            assert_eq!(pt.get_version(&x.keys[0]), Some(x.version));
+            assert_eq!(pt.get_balance(&x.keys[0]), Some(10 - (amount + x.fee)));
+        }
+    }
 }
 //
 //#[cfg(all(feature = "unstable", test))]
