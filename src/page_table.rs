@@ -925,6 +925,21 @@ mod bench {
         });
     }
     #[bench]
+    fn find_new_keys_init(bencher: &mut Bencher) {
+        let mut pt = PageTable::new();
+        let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
+        pt.force_allocate(&transactions, true, 1_000_000);
+        bencher.iter(move || {
+            let mut _lock = vec![false; N];
+            let mut _checked = vec![false; N];
+            let mut _needs_alloc = vec![false; N];
+            let mut _to_pages: Vec<Vec<Option<usize>>> = vec![vec![None; N]; N];
+            for tx in &mut transactions {
+                tx.version += 1;
+            }
+        });
+    }
+    #[bench]
     fn find_new_keys_needs_alloc(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
         let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
