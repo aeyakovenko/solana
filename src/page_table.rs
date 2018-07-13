@@ -1011,11 +1011,11 @@ mod bench {
         let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
         bencher.iter(move || {
-            let mut lock = vec![false; N];
-            let mut needs_alloc = vec![false; N];
-            let mut checked = vec![false; N];
-            let mut to_pages: Vec<Vec<Option<usize>>> = vec![vec![None; N]; N];
-            let mut loaded_page_table: Vec<Vec<_>> = (0..N)
+            let mut _lock = vec![false; N];
+            let mut _needs_alloc = vec![false; N];
+            let mut _checked = vec![false; N];
+            let mut _to_pages: Vec<Vec<Option<usize>>> = vec![vec![None; N]; N];
+            let mut _loaded_page_table: Vec<Vec<_>> = (0..N)
                 .map(|_| {
                     (0..N)
                         .map(|_| unsafe {
