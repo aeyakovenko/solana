@@ -517,7 +517,7 @@ impl PageTable {
         loaded_page_table: &mut Vec<Vec<&mut Page>>,
     ) {
         packet
-            .into_par_iter()
+            .into_iter()
             .zip(loaded_page_table)
             .zip(checked)
             .for_each(|((tx, loaded_pages), checked)| {
