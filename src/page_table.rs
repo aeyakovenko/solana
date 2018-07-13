@@ -447,6 +447,7 @@ impl PageTable {
     fn load_pages(
         // Pass the _allocated_pages argument to make sure the lock is held for this call
         _allocated_pages: &AllocatedPages,
+        packet: &Vec<Call>,
         page_table: &mut Vec<Page>,
         checked: &Vec<bool>,
         pages: &Vec<Vec<Option<usize>>>,
@@ -456,7 +457,7 @@ impl PageTable {
             if !*check {
                 continue;
             }
-            for (j, oix) in pages[i].iter().enumerate() {
+            for (j, (_, oix)) in packet[i].keys.iter().zip(pages[i].iter()).enumerate() {
                 let ix = oix.expect("checked pages should be loadable");
                 let free_ref = unsafe {
                     let ptr = &mut page_table[ix] as *mut Page;
@@ -530,7 +531,11 @@ impl PageTable {
                     0xfefefefefefefefe as *const Page
                 );
                 loaded_pages[0].balance -= tx.fee;
-                let mut call_pages: Vec<_> = loaded_pages.iter().map(|x| (*(*x)).clone()).collect();
+                let mut call_pages: Vec<_> = tx.keys
+                    .iter()
+                    .zip(loaded_pages.iter())
+                    .map(|(_, x)| (*(*x)).clone())
+                    .collect();
                 let (pre_unspendable, pre_total) =
                     Self::calc_balance_limits(&tx, loaded_pages, &call_pages);
                 // TODO(anatoly): Load actual memory
@@ -583,6 +588,7 @@ impl PageTable {
         let allocated_pages = self.allocated_pages.read().unwrap();
         Self::load_pages(
             &allocated_pages,
+            &packet,
             &mut self.page_table,
             checked,
             page_indexes,
