@@ -49,8 +49,8 @@ const DEFAULT_CONTRACT: [u64; 4] = [0u64; 4];
 /// method 0
 /// reallocate
 /// spend the funds from the call to the first recepient
-pub fn SYSTEM_0_realloc(_call: &Call, pages: &mut Vec<Page>, user_data: Vec<u8>) {
-    let size: u64 = deserialize(&user_data).unwrap();
+pub fn system_0_realloc(call: &Call, pages: &mut Vec<Page>) {
+    let size: u64 = deserialize(&call.user_data).unwrap();
     // TODO(anatoly): add a stage to cleanup any pages that do not hold enough balance for the size
     // of the page
     pages[0].memory.resize(size as usize, 0u8);
@@ -58,8 +58,8 @@ pub fn SYSTEM_0_realloc(_call: &Call, pages: &mut Vec<Page>, user_data: Vec<u8>)
 /// method 1
 /// assign
 /// assign the page to a contract
-pub fn SYSTEM_1_assign(call: &Call, pages: &mut Vec<Page>, user_data: Vec<u8>) {
-    let contract = deserialize(&user_data).unwrap();
+pub fn system_1_assign(call: &Call, pages: &mut Vec<Page>) {
+    let contract = deserialize(&call.user_data).unwrap();
     if call.contract == DEFAULT_CONTRACT || pages[0].contract == call.contract {
         pages[0].contract = contract;
     }
@@ -69,8 +69,8 @@ pub fn SYSTEM_1_assign(call: &Call, pages: &mut Vec<Page>, user_data: Vec<u8>) {
 /// method 128
 /// move_funds
 /// spend the funds from the call to the first recepient
-pub fn DEFAULT_CONTRACT_128_move_funds(_call: &Call, pages: &mut Vec<Page>, user_data: Vec<u8>) {
-    let amount: u64 = deserialize(&user_data).unwrap();
+pub fn default_contract_128_move_funds(call: &Call, pages: &mut Vec<Page>) {
+    let amount: u64 = deserialize(&call.user_data).unwrap();
     pages[0].balance -= amount;
     pages[1].balance += amount;
 }
@@ -167,7 +167,7 @@ pub struct Page {
 }
 
 impl Page {
-    fn new(owner: [u64; 4], contract: [u64; 4], balance: u64) -> Page {
+    pub fn new(owner: [u64; 4], contract: [u64; 4], balance: u64) -> Page {
         Page {
             owner: owner,
             contract: contract,
@@ -312,7 +312,9 @@ impl PageTable {
                 .sum();
             acquired_memory[i] = collision != 0;
             if collision != 0 {
-                tx.keys.into_iter().map({ |k| mem_locks.insert(k) });
+                for k in &tx.keys {
+                    mem_locks.insert(*k);
+                }
             }
         }
     }
@@ -377,19 +379,11 @@ impl PageTable {
         let mut allocated_pages = self.allocated_pages.write().unwrap();
         for tx in packet.iter() {
             let key = if owner {
-                tx.call.caller
+                tx.keys[0]
             } else {
-                tx.destination
+                tx.keys[1]
             };
-            let page = Page {
-                owner: key,
-                contract: tx.call.contract,
-                balance: amount,
-                version: 0,
-                size: 0,
-                pointer: 0,
-                memhash: [0, 0, 0, 0],
-            };
+            let page = Page::new(key, tx.contract, amount);
             let ix = allocated_pages.allocate(key) as usize;
             if self.page_table.len() <= ix {
                 self.page_table.resize(ix + 1, page);
@@ -409,13 +403,10 @@ impl PageTable {
         //with copy and write, and send this table to the vote signer
         for (i, tx) in txs.iter().enumerate() {
             if from_pages[i].is_some() {
-                assert_eq!(
-                    tx.call.caller,
-                    self.page_table[from_pages[i].unwrap()].owner
-                );
+                assert_eq!(tx.keys[0], self.page_table[from_pages[i].unwrap()].owner);
             }
             if to_pages[i].is_some() {
-                assert_eq!(tx.destination, self.page_table[to_pages[i].unwrap()].owner);
+                assert_eq!(tx.keys[1], self.page_table[to_pages[i].unwrap()].owner);
             }
         }
     }
@@ -464,9 +455,9 @@ impl PageTable {
     }
 
     fn load_pages(
-        &self,
         // Pass the _allocated_pages argument to make sure the lock is held for this call
         _allocated_pages: &AllocatedPages,
+        page_table: &mut Vec<Page>,
         checked: &Vec<bool>,
         pages: &Vec<Vec<Option<usize>>>,
         loaded_page_table: &mut Vec<Vec<&mut Page>>,
@@ -478,7 +469,7 @@ impl PageTable {
             for (j, oix) in pages[i].iter().enumerate() {
                 let ix = oix.expect("checked pages should be loadable");
                 let free_ref = unsafe {
-                    let ptr = &mut self.page_table[ix] as *mut Page;
+                    let ptr = &mut page_table[ix] as *mut Page;
                     // This unsafe decouples the liftime of the page from the page_table
                     // this is safe todo while `_allocated_pages` READ lock is alive
                     &mut *ptr
@@ -532,12 +523,12 @@ impl PageTable {
         _allocated_pages: &AllocatedPages,
         packet: &Vec<Call>,
         checked: &Vec<bool>,
-        loaded_page_table: &Vec<Vec<&mut Page>>,
+        loaded_page_table: &mut Vec<Vec<&mut Page>>,
     ) {
         packet
             .into_par_iter()
-            .zip(loaded_page_table.par_iter_mut())
-            .zip(checked.into_par_iter())
+            .zip(loaded_page_table)
+            .zip(checked)
             .map(|((tx, loaded_pages), checked)| {
                 if !checked {
                     return;
@@ -553,11 +544,11 @@ impl PageTable {
                 match (tx.contract, tx.method) {
                     // system interface
                     // everyone has the same reallocate
-                    (_, 0) => SYSTEM_0_realloc(&tx, &mut call_pages, tx.user_data),
-                    (_, 1) => SYSTEM_1_assign(&tx, &mut call_pages, tx.user_data),
+                    (_, 0) => system_0_realloc(&tx, &mut call_pages),
+                    (_, 1) => system_1_assign(&tx, &mut call_pages),
                     // contract methods
                     (DEFAULT_CONTRACT, 128) => {
-                        DEFAULT_CONTRACT_128_move_funds(&tx, &mut call_pages, tx.user_data)
+                        default_contract_128_move_funds(&tx, &mut call_pages)
                     }
                     (contract, method) => {
                         warn!("unknown contract and method {:?} {:x}", contract, method)
@@ -595,7 +586,13 @@ impl PageTable {
         loaded_page_table: &mut Vec<Vec<&mut Page>>,
     ) {
         let allocated_pages = self.allocated_pages.read().unwrap();
-        self.load_pages(&allocated_pages, checked, page_indexes, loaded_page_table);
+        Self::load_pages(
+            &allocated_pages,
+            &mut self.page_table,
+            checked,
+            page_indexes,
+            loaded_page_table,
+        );
         Self::par_execute(&allocated_pages, packet, checked, loaded_page_table);
     }
 
