@@ -227,7 +227,7 @@ impl Call {
             last_id: last_id,
             last_hash: last_hash,
             contract: DEFAULT_CONTRACT,
-            method: 0,
+            method: 128,
             fee: fee,
             version: version,
             user_data: serialize(&amount).unwrap(),
@@ -455,7 +455,7 @@ impl PageTable {
         loaded_page_table: &mut Vec<Vec<&mut Page>>,
     ) {
         for (i, check) in checked.into_iter().enumerate() {
-            if *check {
+            if !*check {
                 continue;
             }
             for (j, oix) in pages[i].iter().enumerate() {
@@ -526,6 +526,11 @@ impl PageTable {
                     return;
                 }
                 // Spend the fee first
+                trace!("executing {:p}", loaded_pages[0]);
+                assert_ne!(
+                    loaded_pages[0] as *const Page,
+                    0xfefefefefefefefe as *const Page
+                );
                 loaded_pages[0].balance -= tx.fee;
                 let mut call_pages: Vec<_> = loaded_pages.iter().map(|x| (*(*x)).clone()).collect();
                 let (pre_unspendable, pre_total) =
@@ -563,6 +568,7 @@ impl PageTable {
                         **pre = post;
                     }
                 }
+                loaded_pages[0].version = tx.version;
             });
     }
 
@@ -584,6 +590,7 @@ impl PageTable {
             page_indexes,
             loaded_page_table,
         );
+
         Self::par_execute(&allocated_pages, packet, checked, loaded_page_table);
     }
 
@@ -820,7 +827,8 @@ mod test {
             .map(|_| {
                 (0..N)
                     .map(|_| unsafe {
-                        let ptr = 0xfefefefefefefe as *mut Page;
+                        // Fill the loaded_page_table with a dummy reference
+                        let ptr = 0xfefefefefefefefe as *mut Page;
                         &mut *ptr
                     })
                     .collect()
@@ -828,7 +836,6 @@ mod test {
             .collect();
         pt.acquire_memory_lock(&transactions, &mut lock);
         pt.validate_call(&transactions, &lock, &mut checked);
-        pt.sanity_check_pages(&transactions, &checked, &to_pages);
         pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
         pt.sanity_check_pages(&transactions, &checked, &to_pages);
         pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
@@ -839,7 +846,6 @@ mod test {
             &mut to_pages,
             &mut loaded_page_table,
         );
-        pt.sanity_check_pages(&transactions, &checked, &to_pages);
         for (i, x) in transactions.iter().enumerate() {
             assert!(checked[i]);
             let amount: u64 = deserialize(&x.user_data).unwrap();
