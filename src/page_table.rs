@@ -1014,7 +1014,7 @@ mod bench {
             let mut lock = vec![false; N];
             let mut needs_alloc = vec![false; N];
             let mut checked = vec![false; N];
-            let mut to_pages = vec![vec![None; N]; N];
+            let mut to_pages: Vec<Vec<Option<usize>>> = vec![vec![None; N]; N];
             let mut loaded_page_table: Vec<Vec<_>> = (0..N)
                 .map(|_| {
                     (0..N)
