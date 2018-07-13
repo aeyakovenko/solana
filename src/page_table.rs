@@ -369,9 +369,9 @@ impl PageTable {
             }
             pages[i] = tx.keys.iter().map(|k| allocated_pages.lookup(k)).collect();
             needs_alloc[i] = false;
-            pages[i].iter().map(|x| {
+            for x in &pages[i] {
                 needs_alloc[i] |= x.is_none();
-            });
+            }
         }
     }
     #[cfg(test)]
