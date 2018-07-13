@@ -16,7 +16,6 @@
 ///    tag allows the contract to Write to the memory owned by the page.  Contracts can spend money
 use bincode::{deserialize, serialize};
 use rand::{thread_rng, Rng};
-use rayon::prelude::*;
 use std::collections::{BTreeMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::sync::{Mutex, RwLock};
