@@ -864,20 +864,21 @@ mod test {
     }
     #[test]
     fn load_and_execute_bench_test() {
+        const T: usize = N;
         let mut pt = PageTable::new();
-        let mut ttx: Vec<Vec<_>> = (0..N)
-            .map(|_| (0..N).map(|_r| random_tx()).collect())
+        let mut ttx: Vec<Vec<_>> = (0..T)
+            .map(|_| (0..T).map(|_r| random_tx()).collect())
             .collect();
         for transactions in &ttx {
             pt.force_allocate(transactions, true, 1_000_000);
         }
-        let mut lock = vec![false; N];
-        let mut needs_alloc = vec![false; N];
-        let mut checked = vec![false; N];
-        let mut to_pages = vec![vec![None; N]; N];
-        let mut loaded_page_table: Vec<Vec<_>> = (0..N)
+        let mut lock = vec![false; T];
+        let mut needs_alloc = vec![false; T];
+        let mut checked = vec![false; T];
+        let mut to_pages = vec![vec![None; T]; T];
+        let mut loaded_page_table: Vec<Vec<_>> = (0..T)
             .map(|_| {
-                (0..N)
+                (0..T)
                     .map(|_| unsafe {
                         // Fill the loaded_page_table with a dummy reference
                         let ptr = 0xfefefefefefefefe as *mut Page;
@@ -890,7 +891,7 @@ mod test {
         let start = Instant::now();
         let count = 10000;
         for _ in 0..count {
-            let transactions = &mut ttx[rand::thread_rng().next_u64() as usize % N];
+            let transactions = &mut ttx[rand::thread_rng().next_u64() as usize % T];
             for tx in transactions.iter_mut() {
                 tx.version += 1;
             }
@@ -911,11 +912,11 @@ mod test {
         let done = start.elapsed();
         let ns = done.as_secs() * 1_000_000_000 + done.subsec_nanos() as u64;
         println!(
-            "done {:?} {}ns/N {}ns {} p/s",
+            "done {:?} {}ns/packet {}ns/t {} tp/s",
             done,
             ns / count,
-            ns / (count * N as u64),
-            (1_000_000_000 * count * N as u64) / ns
+            ns / (count * T as u64),
+            (1_000_000_000 * count * T as u64) / ns
         );
     }
 }
