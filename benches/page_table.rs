@@ -5,7 +5,6 @@ extern crate solana;
 
 use criterion::{Bencher, Criterion};
 use rand::{thread_rng, RngCore};
-use solana::page_table;
 use solana::page_table::{Call, Page, PageTable};
 
 const N: usize = 1024;
