@@ -871,7 +871,7 @@ mod bench {
     use page_table::{Page, PageTable};
     use rand::{thread_rng, RngCore};
 
-    const N: usize = 1024 * 4;
+    const N: usize = 256;
     #[bench]
     fn update_version(bencher: &mut Bencher) {
         let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
