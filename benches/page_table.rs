@@ -4,7 +4,6 @@ extern crate rand;
 extern crate solana;
 
 use criterion::{Bencher, Criterion};
-use rand::{thread_rng, RngCore};
 use solana::page_table::{Call, Page, PageTable};
 
 const N: usize = 1024;
@@ -218,7 +217,7 @@ fn bench_load_and_execute_large_table(criterion: &mut Criterion) {
         b.iter_with_large_setup(
             || {
                 let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
-                pt.force_allocate(transactions, true, 1_000_000);
+                pt.force_allocate(&transactions, true, 1_000_000);
                 let lock = vec![false; N];
                 let needs_alloc = vec![false; N];
                 let checked = vec![false; N];
