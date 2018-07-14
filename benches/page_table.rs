@@ -274,6 +274,6 @@ fn bench_load_and_execute_large_table(criterion: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default().sample_size(2);
-    targets = bench
+    targets = bench_load_and_execute_large_table
 );
 criterion_main!(benches);
