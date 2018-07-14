@@ -214,16 +214,11 @@ fn bench_load_and_execute(bencher: &mut Bencher) {
 }
 fn bench_load_and_execute_large_table(criterion: &mut Criterion) {
     let mut pt = PageTable::new();
-    let mut ttx: Vec<Vec<_>> = (0..N)
-        .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
-        .collect();
-    for transactions in &ttx {
-        pt.force_allocate(transactions, true, 1_000_000);
-    }
     criterion.bench_function("with_setup", move |b| {
         b.iter_with_large_setup(
             || {
-                let mut transactions = &mut ttx[thread_rng().next_u64() as usize % N];
+                let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
+                pt.force_allocate(transactions, true, 1_000_000);
                 let lock = vec![false; N];
                 let needs_alloc = vec![false; N];
                 let checked = vec![false; N];
