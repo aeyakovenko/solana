@@ -1023,7 +1023,7 @@ mod bench {
         });
     }
     #[bench]
-    fn laod_and_execute_init(bencher: &mut Bencher) {
+    fn load_and_execute_init(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
         let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
@@ -1049,7 +1049,7 @@ mod bench {
         });
     }
     #[bench]
-    fn laod_and_execute(bencher: &mut Bencher) {
+    fn load_and_execute(bencher: &mut Bencher) {
         let mut pt = PageTable::new();
         let mut transactions: Vec<_> = (0..N).map(|_r| random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
@@ -1096,6 +1096,7 @@ mod bench {
         for transactions in &ttx {
             pt.force_allocate(transactions, true, 1_000_000);
         }
+        page_table::test::load_and_execute();
         page_table::test::load_and_execute();
         bencher.iter(move || {
             let transactions = &mut ttx[thread_rng().next_u64() as usize % N];
