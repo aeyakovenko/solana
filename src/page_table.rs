@@ -660,6 +660,8 @@ mod test {
     use page_table::{Call, Page, PageTable};
     use rand;
     use rand::RngCore;
+    use std::time::Instant;
+
     const N: usize = 256;
 
     pub fn rand4() -> [u64; 4] {
@@ -859,6 +861,62 @@ mod test {
             assert_eq!(pt.get_version(&x.keys[0]), Some(x.version));
             assert_eq!(pt.get_balance(&x.keys[0]), Some(10 - (amount + x.fee)));
         }
+    }
+    #[test]
+    fn load_and_execute_bench_test() {
+        let mut pt = PageTable::new();
+        let mut ttx: Vec<Vec<_>> = (0..N)
+            .map(|_| (0..N).map(|_r| random_tx()).collect())
+            .collect();
+        for transactions in &ttx {
+            pt.force_allocate(transactions, true, 1_000_000);
+        }
+        let mut lock = vec![false; N];
+        let mut needs_alloc = vec![false; N];
+        let mut checked = vec![false; N];
+        let mut to_pages = vec![vec![None; N]; N];
+        let mut loaded_page_table: Vec<Vec<_>> = (0..N)
+            .map(|_| {
+                (0..N)
+                    .map(|_| unsafe {
+                        // Fill the loaded_page_table with a dummy reference
+                        let ptr = 0xfefefefefefefefe as *mut Page;
+                        &mut *ptr
+                    })
+                    .collect()
+            })
+            .collect();
+        load_and_execute();
+        let start = Instant::now();
+        let count = 10000;
+        for _ in 0..count {
+            let transactions = &mut ttx[rand::thread_rng().next_u64() as usize % N];
+            for tx in transactions.iter_mut() {
+                tx.version += 1;
+            }
+            pt.acquire_memory_lock(&transactions, &mut lock);
+            pt.validate_call(&transactions, &lock, &mut checked);
+            pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
+            pt.sanity_check_pages(&transactions, &checked, &to_pages);
+            pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
+            pt.sanity_check_pages(&transactions, &checked, &to_pages);
+            pt.load_and_execute(
+                &transactions,
+                &mut checked,
+                &mut to_pages,
+                &mut loaded_page_table,
+            );
+            pt.release_memory_lock(&transactions, &lock);
+        }
+        let done = start.elapsed();
+        let ns = done.as_secs() * 1_000_000_000 + done.subsec_nanos() as u64;
+        println!(
+            "done {:?} {}ns/N {}ns {} p/s",
+            done,
+            ns / count,
+            ns / (count * N as u64),
+            (1_000_000_000 * count * N as u64) / ns
+        );
     }
 }
 
@@ -1133,4 +1191,5 @@ mod bench {
             pt.release_memory_lock(&transactions, &lock);
         });
     }
+
 }
