@@ -212,10 +212,10 @@ fn bench_load_and_execute(bencher: &mut Bencher) {
     });
 }
 fn bench_load_and_execute_large_table(criterion: &mut Criterion) {
-    let mut pt = PageTable::new();
     criterion.bench_function("with_setup", move |b| {
         b.iter_with_large_setup(
             || {
+                let mut pt = PageTable::new();
                 let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
                 pt.force_allocate(&transactions, true, 1_000_000);
                 let lock = vec![false; N];
@@ -237,6 +237,7 @@ fn bench_load_and_execute_large_table(criterion: &mut Criterion) {
                     tx.version += 1;
                 }
                 (
+                    pt,
                     transactions,
                     lock,
                     needs_alloc,
@@ -246,6 +247,7 @@ fn bench_load_and_execute_large_table(criterion: &mut Criterion) {
                 )
             },
             |(
+                mut pt,
                 transactions,
                 mut lock,
                 mut needs_alloc,
