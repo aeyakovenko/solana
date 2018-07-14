@@ -866,6 +866,7 @@ mod test {
 mod bench {
     extern crate test;
     use self::test::Bencher;
+    use page_table;
     use page_table::test::random_tx;
     use page_table::{Page, PageTable};
     use rand::{thread_rng, RngCore};
@@ -1095,6 +1096,7 @@ mod bench {
         for transactions in &ttx {
             pt.force_allocate(transactions, true, 1_000_000);
         }
+        page_table::test::load_and_execute();
         bencher.iter(move || {
             let transactions = &mut ttx[thread_rng().next_u64() as usize % N];
             let mut lock = vec![false; N];
