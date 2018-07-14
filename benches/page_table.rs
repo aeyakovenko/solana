@@ -9,7 +9,7 @@ use solana::page_table;
 use solana::page_table::{Call, Page, PageTable};
 
 const N: usize = 1024;
-fn update_version(bencher: &mut Bencher) {
+fn bench_update_version(bencher: &mut Bencher) {
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     bencher.iter(move || {
         for tx in &mut transactions {
@@ -17,7 +17,7 @@ fn update_version(bencher: &mut Bencher) {
         }
     });
 }
-fn mem_lock(bencher: &mut Bencher) {
+fn bench_mem_lock(bencher: &mut Bencher) {
     let pt = PageTable::new();
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     bencher.iter(move || {
@@ -29,7 +29,7 @@ fn mem_lock(bencher: &mut Bencher) {
         pt.release_memory_lock(&transactions, &lock);
     });
 }
-fn validate_call_miss(bencher: &mut Bencher) {
+fn bench_validate_call_miss(bencher: &mut Bencher) {
     let mut pt = PageTable::new();
     let fill_table: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     pt.force_allocate(&fill_table, true, 1_000_000);
@@ -45,7 +45,7 @@ fn validate_call_miss(bencher: &mut Bencher) {
         pt.release_memory_lock(&transactions, &lock);
     });
 }
-fn validate_call_hit(bencher: &mut Bencher) {
+fn bench_validate_call_hit(bencher: &mut Bencher) {
     let mut pt = PageTable::new();
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     pt.force_allocate(&transactions, true, 1_000_000);
@@ -60,7 +60,7 @@ fn validate_call_hit(bencher: &mut Bencher) {
         pt.release_memory_lock(&transactions, &lock);
     });
 }
-fn find_new_keys_init(bencher: &mut Bencher) {
+fn bench_find_new_keys_init(bencher: &mut Bencher) {
     let mut pt = PageTable::new();
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     pt.force_allocate(&transactions, true, 1_000_000);
@@ -74,7 +74,7 @@ fn find_new_keys_init(bencher: &mut Bencher) {
         }
     });
 }
-fn find_new_keys_needs_alloc(bencher: &mut Bencher) {
+fn bench_find_new_keys_needs_alloc(bencher: &mut Bencher) {
     let mut pt = PageTable::new();
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     pt.force_allocate(&transactions, true, 1_000_000);
@@ -92,7 +92,7 @@ fn find_new_keys_needs_alloc(bencher: &mut Bencher) {
         pt.release_memory_lock(&transactions, &lock);
     });
 }
-fn find_new_keys_no_alloc(bencher: &mut Bencher) {
+fn bench_find_new_keys_no_alloc(bencher: &mut Bencher) {
     let mut pt = PageTable::new();
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     pt.force_allocate(&transactions, true, 1_000_000);
@@ -111,7 +111,7 @@ fn find_new_keys_no_alloc(bencher: &mut Bencher) {
         pt.release_memory_lock(&transactions, &lock);
     });
 }
-fn allocate_new_keys_some_new_allocs(bencher: &mut Bencher) {
+fn bench_allocate_new_keys_some_new_allocs(bencher: &mut Bencher) {
     let mut pt = PageTable::new();
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     pt.force_allocate(&transactions, true, 1_000_000);
@@ -130,7 +130,7 @@ fn allocate_new_keys_some_new_allocs(bencher: &mut Bencher) {
         pt.release_memory_lock(&transactions, &lock);
     });
 }
-fn allocate_new_keys_no_new_allocs(bencher: &mut Bencher) {
+fn bench_allocate_new_keys_no_new_allocs(bencher: &mut Bencher) {
     let mut pt = PageTable::new();
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     pt.force_allocate(&transactions, true, 1_000_000);
@@ -150,7 +150,7 @@ fn allocate_new_keys_no_new_allocs(bencher: &mut Bencher) {
         pt.release_memory_lock(&transactions, &lock);
     });
 }
-fn load_and_execute_init(bencher: &mut Bencher) {
+fn bench_load_and_execute_init(bencher: &mut Bencher) {
     let mut pt = PageTable::new();
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     pt.force_allocate(&transactions, true, 1_000_000);
@@ -175,7 +175,7 @@ fn load_and_execute_init(bencher: &mut Bencher) {
         }
     });
 }
-fn load_and_execute(bencher: &mut Bencher) {
+fn bench_load_and_execute(bencher: &mut Bencher) {
     let mut pt = PageTable::new();
     let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
     pt.force_allocate(&transactions, true, 1_000_000);
@@ -213,7 +213,7 @@ fn load_and_execute(bencher: &mut Bencher) {
         pt.release_memory_lock(&transactions, &lock);
     });
 }
-fn load_and_execute_large_table(criterion: &mut Criterion) {
+fn bench_load_and_execute_large_table(criterion: &mut Criterion) {
     let mut pt = PageTable::new();
     let mut ttx: Vec<Vec<_>> = (0..N)
         .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
@@ -222,7 +222,7 @@ fn load_and_execute_large_table(criterion: &mut Criterion) {
         pt.force_allocate(transactions, true, 1_000_000);
     }
     criterion.bench_function("with_setup", move |b| {
-        bencher.iter_with_large_setup(
+        b.iter_with_large_setup(
             || {
                 let mut transactions = &mut ttx[thread_rng().next_u64() as usize % N];
                 let lock = vec![false; N];
