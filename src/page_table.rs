@@ -149,7 +149,7 @@ pub struct Page {
     /// balance that belongs to owner
     balance: u64,
     /// version of the structure, public for testing
-    pub version: u64,
+    version: u64,
     /// hash of the page data
     memhash: Hash,
     /// The following could be in a separate structure
@@ -204,7 +204,7 @@ pub struct Call {
     fee: u64,
     /// struct version to prevent duplicate spends
     /// Calls with a version <= Page.version are rejected
-    version: u64,
+    pub version: u64,
     /// method to call in the contract
     method: u8,
     /// usedata in bytes
