@@ -863,7 +863,7 @@ mod test {
     }
     #[test]
     fn load_and_execute_bench_test() {
-        const T: usize = 64;
+        const T: usize = 128;
         let pt = PageTable::new();
         let count = 1000;
         let mut ttx: Vec<Vec<Call>> = (0..count)
