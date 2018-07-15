@@ -450,8 +450,8 @@ impl PageTable {
         needs_alloc: &Vec<bool>,
         pages: &mut Vec<Vec<Option<usize>>>,
     ) {
-        //holds WRITE lock to the page table, since we are adding keys and resizing the table here
         let mut allocated_pages = self.allocated_pages.write().unwrap();
+        //holds WRITE lock to the page table, since we are adding keys and resizing the table here
         //while we hold the write lock, this is where we can create another anonymouns page
         //with copy and write, and send this table to the vote signer
         for (i, tx) in packet.iter().enumerate() {
@@ -486,14 +486,14 @@ impl PageTable {
         }
     }
 
-    fn load_pages(
-        // Pass the _allocated_pages argument to make sure the lock is held for this call
-        allocated_pages: &AllocatedPages,
+    pub fn load_pages(
+        &self,
         packet: &Vec<Call>,
         checked: &Vec<bool>,
         pages: &Vec<Vec<Option<usize>>>,
         loaded_page_table: &mut Vec<Vec<Page>>,
     ) {
+        let allocated_pages = self.allocated_pages.read().unwrap();
         for (i, check) in checked.into_iter().enumerate() {
             if !*check {
                 continue;
@@ -508,7 +508,7 @@ impl PageTable {
     /// calculate the balances in the loaded pages
     /// at the end of the contract the balance must be the same
     /// and contract can only spend tokens from pages assigned to it
-    fn check_balance(tx: &Call, pre_pages: &Vec<Page>, post_pages: &Vec<Page>) -> bool {
+    fn validate_balances(tx: &Call, pre_pages: &Vec<Page>, post_pages: &Vec<Page>) -> bool {
         // contract can spend any of the tokens it owns
         for ((pre, post), _tx) in pre_pages.iter().zip(post_pages.iter()).zip(tx.keys.iter()) {
             if pre.contract != tx.contract && pre.balance != post.balance {
@@ -529,15 +529,21 @@ impl PageTable {
         pre_sum == post_sum
     }
 
-    /// parallel execution of contracts
-    fn par_execute(
+    /// parallel execution of contracts should be possible here since all the alls have no
+    /// dependencies
+    pub fn execute(
         // Pass the _allocated_pages argument to make sure the lock is held for this call
         packet: &Vec<Call>,
         checked: &Vec<bool>,
         loaded_page_table: &mut Vec<Vec<Page>>,
+        commit: &mut Vec<bool>,
     ) {
-        let iter = packet.into_iter().zip(loaded_page_table).zip(checked);
-        iter.for_each(|((tx, loaded_pages), checked)| {
+        let iter = packet
+            .into_iter()
+            .zip(loaded_page_table)
+            .zip(checked)
+            .enumerate();
+        iter.for_each(|(i, ((tx, loaded_pages), checked))| {
             if !checked {
                 return;
             }
@@ -568,9 +574,10 @@ impl PageTable {
             // verify contract bytecode.
 
             // verify tokens
-            if !Self::check_balance(&tx, &loaded_pages, &call_pages) {
+            if !Self::validate_balances(&tx, &loaded_pages, &call_pages) {
                 return;
             }
+            commit[i] = true;
             //commit
             for (pre, post) in loaded_pages.iter_mut().zip(call_pages.into_iter()) {
                 *pre = post;
@@ -580,58 +587,31 @@ impl PageTable {
     }
 
     /// parallel execution of contracts
-    /// first we load the pages, then we pass all the pages to `par_execute` function which can
+    /// first we load the pages, then we pass all the pages to `execute` function which can
     /// safely call them all in parallel
-    pub fn load_and_execute(
+    pub fn commit(
         &self,
         packet: &Vec<Call>,
-        checked: &Vec<bool>,
-        page_indexes: &Vec<Vec<Option<usize>>>,
-        loaded_page_table: &mut Vec<Vec<Page>>,
+        commits: &Vec<bool>,
+        pages: &Vec<Vec<Option<usize>>>,
+        loaded_page_table: &Vec<Vec<Page>>,
     ) {
-        {
-            let allocated_pages = self.allocated_pages.read().unwrap();
-            Self::load_pages(
-                &allocated_pages,
-                &packet,
-                checked,
-                page_indexes,
-                loaded_page_table,
-            );
+        let mut allocated_pages = self.allocated_pages.write().unwrap();
+        for (i, commit) in commits.into_iter().enumerate() {
+            if !*commit {
+                continue;
+            }
+            for (j, (_, oix)) in packet[i].keys.iter().zip(pages[i].iter()).enumerate() {
+                let ix = oix.expect("checked pages should be loadable");
+                allocated_pages.page_table[ix] = loaded_page_table[i][j].clone();
+            }
         }
-
-        Self::par_execute(packet, checked, loaded_page_table);
     }
-
     pub fn get_balance(&self, key: &PublicKey) -> Option<u64> {
         self.allocated_pages.read().unwrap().get_balance(key)
     }
     pub fn get_version(&self, key: &PublicKey) -> Option<u64> {
         self.allocated_pages.read().unwrap().get_version(key)
-    }
-    fn _load_memory(
-        &self,
-        _packet: &Vec<Call>,
-        _checked: &Vec<Option<usize>>,
-        _to_pages: &Vec<Option<usize>>,
-    ) {
-        //TBD
-    }
-    fn _execute_call(
-        &self,
-        _packet: &Vec<Call>,
-        _checked: &Vec<Option<usize>>,
-        _to_pages: &Vec<Option<usize>>,
-    ) {
-        //TBD
-    }
-    fn _write_memory(
-        &self,
-        _packet: &Vec<Call>,
-        _checked: &Vec<Option<usize>>,
-        _to_pages: &Vec<Option<usize>>,
-    ) {
-        //TBD
     }
     pub fn release_memory_lock(&self, packet: &Vec<Call>, lock: &Vec<bool>) {
         //holds mem_locks mutex
@@ -818,18 +798,22 @@ mod test {
         let mut checked = vec![false; N];
         let mut to_pages = vec![vec![None; K]; N];
         let mut loaded_page_table: Vec<Vec<_>> = vec![vec![Page::default(); K]; N];
+        let mut commit = vec![false; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
         pt.validate_call(&transactions, &lock, &mut checked);
         pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
         pt.sanity_check_pages(&transactions, &checked, &to_pages);
         pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
         pt.sanity_check_pages(&transactions, &checked, &to_pages);
-        pt.load_and_execute(
+        pt.load_pages(
             &transactions,
             &mut checked,
             &mut to_pages,
             &mut loaded_page_table,
         );
+        PageTable::execute(&transactions, &checked, &mut loaded_page_table, &mut commit);
+        pt.commit(&transactions, &commit, &to_pages, &loaded_page_table);
+        pt.release_memory_lock(&transactions, &lock);
         for (i, x) in transactions.iter().enumerate() {
             assert!(checked[i]);
             let amount: u64 = deserialize(&x.user_data).unwrap();
@@ -845,6 +829,7 @@ mod test {
         checked: Vec<bool>,
         to_pages: Vec<Vec<Option<usize>>>,
         loaded_page_table: Vec<Vec<Page>>,
+        commit: Vec<bool>,
     }
     impl Context {
         fn new() -> Self {
@@ -853,18 +838,20 @@ mod test {
             let checked = vec![false; N];
             let to_pages = vec![vec![None; K]; N];
             let loaded_page_table: Vec<Vec<_>> = vec![vec![Page::default(); K]; N];
+            let commit = vec![false; N];
             Context {
                 lock,
                 needs_alloc,
                 checked,
                 to_pages,
                 loaded_page_table,
+                commit,
             }
         }
     }
     #[test]
     fn load_and_execute_bench_test() {
-        const T: usize = 128;
+        const T: usize = 1;
         let pt = PageTable::new();
         let count = 1000;
         let mut ttx: Vec<Vec<Call>> = (0..count)
@@ -897,11 +884,23 @@ mod test {
                             &ctx.needs_alloc,
                             &mut ctx.to_pages,
                         );
-                        lpt.load_and_execute(
+                        lpt.load_pages(
                             &transactions,
                             &mut ctx.checked,
                             &mut ctx.to_pages,
                             &mut ctx.loaded_page_table,
+                        );
+                        PageTable::execute(
+                            &transactions,
+                            &ctx.checked,
+                            &mut ctx.loaded_page_table,
+                            &mut ctx.commit,
+                        );
+                        lpt.commit(
+                            &transactions,
+                            &ctx.commit,
+                            &ctx.to_pages,
+                            &ctx.loaded_page_table,
                         );
                         lpt.release_memory_lock(&transactions, &ctx.lock);
                         response.send(()).unwrap();
@@ -924,7 +923,7 @@ mod test {
             let tt = ttx.pop().unwrap();
             threads[thread % T].1.send(tt).unwrap();
         }
-        for thread in T..count {
+        for _thread in T..count {
             recv_answer.recv().unwrap();
         }
         let done = start.elapsed();
