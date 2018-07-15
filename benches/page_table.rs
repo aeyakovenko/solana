@@ -13,7 +13,7 @@ const K: usize = 16;
 fn bench_load_and_execute(criterion: &mut Criterion) {
     criterion.bench_function("bench_load_and_execute", move |b| {
         let mut pt = PageTable::new();
-        let mut ttx: Vec<Vec<_>> = (0..N)
+        let mut ttx: Vec<Vec<Call>> = (0..N)
             .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
             .collect();
         for transactions in &ttx {
