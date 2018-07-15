@@ -14,7 +14,7 @@
 /// it can make.
 /// 3. `Page` entry is similar to an `Account`, but it also has a `contract` that owns it.  That
 ///    tag allows the contract to Write to the memory owned by the page.  Contracts can spend money
-use bincode::deserialize;
+use bincode::{deserialize, serialize};
 use rand::{thread_rng, Rng, RngCore};
 use std::collections::{BTreeMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
