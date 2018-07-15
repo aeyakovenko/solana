@@ -21,8 +21,6 @@ use std::hash::{BuildHasher, Hasher};
 use std::sync::{Mutex, RwLock};
 
 //run with 'cargo +nightly bench --features=unstable,parex page_table::bench'
-#[cfg(feature = "parex")]
-use rayon::prelude::*;
 
 //these types vs just u64 had a 40% impact on perf without FastHasher
 type Hash = [u64; 4];
@@ -653,6 +651,11 @@ mod test {
     use bincode::deserialize;
     use logger;
     use page_table::{Call, Page, PageTable};
+    use std::sync::mpsc::channel;
+    use std::sync::Arc;
+    use std::thread::spawn;
+    use std::time::Instant;
+
     const N: usize = 256;
     const K: usize = 16;
 
@@ -834,6 +837,97 @@ mod test {
             assert_eq!(pt.get_version(&x.keys[0]), Some(x.version));
             assert_eq!(pt.get_balance(&x.keys[0]), Some(10 - (amount + x.fee)));
         }
+    }
+    struct Context {
+        lock: Vec<bool>,
+        needs_alloc: Vec<bool>,
+        checked: Vec<bool>,
+        to_pages: Vec<Vec<Option<usize>>>,
+        loaded_page_table: Vec<Vec<Page>>,
+    }
+    impl Context {
+        fn new() -> Self {
+            let lock = vec![false; N];
+            let needs_alloc = vec![false; N];
+            let checked = vec![false; N];
+            let to_pages = vec![vec![None; K]; N];
+            let loaded_page_table: Vec<Vec<_>> = vec![vec![Page::default(); K]; N];
+            Context {
+                lock,
+                needs_alloc,
+                checked,
+                to_pages,
+                loaded_page_table,
+            }
+        }
+    }
+    #[test]
+    fn load_and_execute_bench_test() {
+        const T: usize = 2;
+        let pt = PageTable::new();
+        let count = 1000;
+        let mut ttx: Vec<Vec<Call>> = (0..count)
+            .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
+            .collect();
+        for tx in &ttx {
+            pt.force_allocate(tx, true, 1_000_000);
+        }
+        let (send_answer, recv_answer) = channel();
+        let spt = Arc::new(pt);
+        let threads: Vec<_> = (0..T)
+            .map(|_| {
+                let (send, recv) = channel();
+                let response = send_answer.clone();
+                let lpt = spt.clone();
+                let t = spawn(move || {
+                    let mut ctx = Context::new();
+                    for transactions in recv.iter() {
+                        lpt.acquire_memory_lock(&transactions, &mut ctx.lock);
+                        lpt.validate_call(&transactions, &ctx.lock, &mut ctx.checked);
+                        lpt.find_new_keys(
+                            &transactions,
+                            &ctx.checked,
+                            &mut ctx.needs_alloc,
+                            &mut ctx.to_pages,
+                        );
+                        lpt.allocate_keys(
+                            &transactions,
+                            &ctx.checked,
+                            &ctx.needs_alloc,
+                            &mut ctx.to_pages,
+                        );
+                        lpt.load_and_execute(
+                            &transactions,
+                            &mut ctx.checked,
+                            &mut ctx.to_pages,
+                            &mut ctx.loaded_page_table,
+                        );
+                        lpt.release_memory_lock(&transactions, &ctx.lock);
+                        response.send(()).unwrap();
+                    }
+                });
+                (t, send)
+            })
+            .collect();
+
+        let start = Instant::now();
+        for thread in 0..count {
+            let tt = ttx.pop().unwrap();
+            threads[thread % T].1.send(tt).unwrap();
+        }
+        for _ in 0..count {
+            recv_answer.recv().unwrap();
+        }
+        let done = start.elapsed();
+        let ns = done.as_secs() as usize * 1_000_000_000 + done.subsec_nanos() as usize;
+        let total = count * N;
+        println!(
+            "done {:?} {}ns/packet {}ns/t {} tp/s",
+            done,
+            ns / count,
+            ns / total,
+            (1_000_000_000 * total) / ns
+        );
     }
 }
 
