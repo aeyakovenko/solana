@@ -532,7 +532,6 @@ impl PageTable {
     /// parallel execution of contracts
     fn par_execute(
         // Pass the _allocated_pages argument to make sure the lock is held for this call
-        _allocated_pages: &AllocatedPages,
         packet: &Vec<Call>,
         checked: &Vec<bool>,
         loaded_page_table: &mut Vec<Vec<Page>>,
@@ -590,16 +589,18 @@ impl PageTable {
         page_indexes: &Vec<Vec<Option<usize>>>,
         loaded_page_table: &mut Vec<Vec<Page>>,
     ) {
-        let allocated_pages = self.allocated_pages.read().unwrap();
-        Self::load_pages(
-            &allocated_pages,
-            &packet,
-            checked,
-            page_indexes,
-            loaded_page_table,
-        );
+        {
+            let allocated_pages = self.allocated_pages.read().unwrap();
+            Self::load_pages(
+                &allocated_pages,
+                &packet,
+                checked,
+                page_indexes,
+                loaded_page_table,
+            );
+        }
 
-        Self::par_execute(&allocated_pages, packet, checked, loaded_page_table);
+        Self::par_execute(packet, checked, loaded_page_table);
     }
 
     pub fn get_balance(&self, key: &PublicKey) -> Option<u64> {
