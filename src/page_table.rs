@@ -656,7 +656,7 @@ mod test {
     use std::thread::spawn;
     use std::time::Instant;
 
-    const N: usize = 256;
+    const N: usize = 512;
     const K: usize = 16;
 
     #[test]
@@ -863,7 +863,7 @@ mod test {
     }
     #[test]
     fn load_and_execute_bench_test() {
-        const T: usize = 32;
+        const T: usize = 64;
         let pt = PageTable::new();
         let count = 1000;
         let mut ttx: Vec<Vec<Call>> = (0..count)
