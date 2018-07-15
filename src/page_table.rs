@@ -14,7 +14,7 @@
 /// it can make.
 /// 3. `Page` entry is similar to an `Account`, but it also has a `contract` that owns it.  That
 ///    tag allows the contract to Write to the memory owned by the page.  Contracts can spend money
-use bincode::{deserialize, serialize};
+use bincode::deserialize;
 use rand::{thread_rng, Rng, RngCore};
 use std::collections::{BTreeMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
@@ -204,7 +204,7 @@ pub struct Call {
     fee: u64,
     /// struct version to prevent duplicate spends
     /// Calls with a version <= Page.version are rejected
-    version: u64,
+    pub version: u64,
     /// method to call in the contract
     method: u8,
     /// usedata in bytes
@@ -221,7 +221,7 @@ impl Call {
         last_hash: Hash,
         amount: u64,
         fee: u64,
-        pub version: u64,
+        version: u64,
         to: PublicKey,
     ) -> Self {
         Call {
@@ -243,7 +243,7 @@ impl Call {
     pub fn random_tx() -> Call {
         //sanity check
         assert_ne!(Self::rand4(), Self::rand4());
-        Call::new_tx(Self::rand4(), 0, Self::rand4(), 1, 1, 1, Self::rand4())
+        Self::new_tx(Self::rand4(), 0, Self::rand4(), 1, 1, 1, Self::rand4())
     }
 }
 
