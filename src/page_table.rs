@@ -914,7 +914,7 @@ mod test {
         for thread in 0..count {
             let tt = ttx.pop().unwrap();
             threads[thread % T].1.send(tt).unwrap();
-            if threads == T {
+            if thread == T {
                 start = Instant::now();
             }
         }
