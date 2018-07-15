@@ -106,3 +106,7 @@ harness = false
 [[bench]]
 name = "streamer"
 harness = false
+
+[[bench]]
+name = "page_table"
+harness = false
