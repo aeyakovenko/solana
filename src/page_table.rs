@@ -221,7 +221,7 @@ impl Call {
         last_hash: Hash,
         amount: u64,
         fee: u64,
-        version: u64,
+        pub version: u64,
         to: PublicKey,
     ) -> Self {
         Call {
@@ -375,7 +375,6 @@ impl PageTable {
             }
         }
     }
-    #[cfg(test)]
     pub fn force_allocate(&mut self, packet: &Vec<Call>, owner: bool, amount: u64) {
         let mut allocated_pages = self.allocated_pages.write().unwrap();
         for tx in packet.iter() {
@@ -1168,9 +1167,7 @@ mod bench {
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_call(&transactions, &lock, &mut checked);
             pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
-            pt.sanity_check_pages(&transactions, &checked, &to_pages);
             pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
-            pt.sanity_check_pages(&transactions, &checked, &to_pages);
             pt.load_and_execute(
                 &transactions,
                 &mut checked,
