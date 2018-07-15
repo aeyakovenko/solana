@@ -884,7 +884,7 @@ mod test {
 
     type ContextRecycler = Recycler<Context>;
     #[test]
-    fn load_and_execute_bench_test_pipeline() {
+    fn load_and_execute_pipeline_bench() {
         let context_recycler = ContextRecycler::default();
         let pt = PageTable::new();
         let count = 1000;
@@ -976,7 +976,7 @@ mod test {
         let ns = done.as_secs() as usize * 1_000_000_000 + done.subsec_nanos() as usize;
         let total = count * N;
         println!(
-            "done {:?} {}ns/packet {}ns/t {} tp/s",
+            "PIPELINE: done {:?} {}ns/packet {}ns/t {} tp/s",
             done,
             ns / (count - 1),
             ns / total,
@@ -984,7 +984,7 @@ mod test {
         );
     }
     #[test]
-    fn load_and_execute_bench_test() {
+    fn load_and_execute_mt_bench() {
         const T: usize = 4;
         let pt = PageTable::new();
         let count = 1000;
@@ -1064,7 +1064,8 @@ mod test {
         let ns = done.as_secs() as usize * 1_000_000_000 + done.subsec_nanos() as usize;
         let total = (count - T) * N;
         println!(
-            "done {:?} {}ns/packet {}ns/t {} tp/s",
+            "MT-{}: done {:?} {}ns/packet {}ns/t {} tp/s",
+            T,
             done,
             ns / (count - T),
             ns / total,
