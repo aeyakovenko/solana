@@ -885,9 +885,7 @@ mod test {
             pt.acquire_memory_lock(&transactions, &mut lock);
             pt.validate_call(&transactions, &lock, &mut checked);
             pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
-            pt.sanity_check_pages(&transactions, &checked, &to_pages);
             pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
-            pt.sanity_check_pages(&transactions, &checked, &to_pages);
             pt.load_and_execute(
                 &transactions,
                 &mut checked,
