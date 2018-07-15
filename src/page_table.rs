@@ -965,11 +965,11 @@ mod test {
         recv_answer.recv().unwrap();
 
         let start = Instant::now();
-        for _ in 0..count {
+        for _ in 1..count {
             let tt = ttx.pop().unwrap();
             send_transactions.send(tt).unwrap();
         }
-        for _ in 0..count {
+        for _ in 1..count {
             recv_answer.recv().unwrap();
         }
         let done = start.elapsed();
