@@ -656,7 +656,7 @@ mod test {
     use std::thread::spawn;
     use std::time::Instant;
 
-    const N: usize = 512;
+    const N: usize = 256;
     const K: usize = 16;
 
     #[test]
