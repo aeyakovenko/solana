@@ -910,21 +910,24 @@ mod test {
             })
             .collect();
 
-        let start = Instant::now();
+        let mut start = Instant::now();
         for thread in 0..count {
             let tt = ttx.pop().unwrap();
             threads[thread % T].1.send(tt).unwrap();
+            if threads == T {
+                start = Instant::now();
+            }
         }
         for _ in 0..count {
             recv_answer.recv().unwrap();
         }
         let done = start.elapsed();
         let ns = done.as_secs() as usize * 1_000_000_000 + done.subsec_nanos() as usize;
-        let total = count * N;
+        let total = (count - T) * N;
         println!(
             "done {:?} {}ns/packet {}ns/t {} tp/s",
             done,
-            ns / count,
+            ns / (count - T),
             ns / total,
             (1_000_000_000 * total) / ns
         );
