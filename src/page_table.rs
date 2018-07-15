@@ -476,39 +476,30 @@ impl PageTable {
     /// calculate the balances in the loaded pages
     /// at the end of the contract the balance must be the same
     /// and contract can only spend tokens from pages assigned to it
-    fn calc_balance_limits(
-        tx: &Call,
-        pre_pages: &Vec<&mut Page>,
-        post_pages: &Vec<Page>,
-    ) -> (u64, u64) {
-        // contract can spend any of the tokens it owns
-        let spendable: u64 = pre_pages
-            .iter()
-            .zip(post_pages.iter())
-            .map(|(pre, post)| {
-                if pre.contract == tx.contract {
-                    post.balance
-                } else {
-                    0
+    fn check_balance(tx: &Call, pre_pages: &Vec<&mut Page>, post_pages: &Vec<Page>) -> bool {
+        // contract can't spend any of the tokens it doesn't own
+        for ((_, pre), post) in tx.keys.iter().zip(pre_pages.iter()).zip(post_pages.iter()) {
+            if pre.contract != tx.contract {
+                if post.balance < pre.balance {
+                    return false;
                 }
-            })
+            }
+        }
+
+        // contract can create tokens
+        let pre_total: u64 = pre_pages
+            .iter()
+            .zip(tx.keys.iter())
+            .map(|(pre, _)| pre.balance)
             .sum();
 
-        // contract can't spend any of the tokens it doesn't own
-        let unspendable = pre_pages
+        let post_total: u64 = post_pages
             .iter()
-            .zip(post_pages.iter())
-            .map(|(pre, post)| {
-                if pre.contract != tx.contract {
-                    post.balance
-                } else {
-                    0
-                }
-            })
+            .zip(tx.keys.iter())
+            .map(|(post, _)| post.balance)
             .sum();
-        // in the end the total must be the same
-        let total = spendable + unspendable;
-        (unspendable, total)
+
+        pre_total == post_total
     }
 
     /// parallel execution of contracts
@@ -539,9 +530,6 @@ impl PageTable {
                 .zip(loaded_pages.iter())
                 .map(|(_, x)| (*(*x)).clone())
                 .collect();
-            let (pre_unspendable, pre_total) =
-                Self::calc_balance_limits(&tx, loaded_pages, &call_pages);
-            // TODO(anatoly): Load actual memory
 
             // Find the method
             match (tx.contract, tx.method) {
@@ -562,13 +550,13 @@ impl PageTable {
             // Read only.  Code should verify memory integrity or
             // verify contract bytecode.
 
-            // verify tokens
-            let (post_unspendable, post_total) =
-                Self::calc_balance_limits(&tx, loaded_pages, &call_pages);
-
             //commit
-            if post_total == pre_total && post_unspendable >= pre_unspendable {
-                for (pre, post) in loaded_pages.into_iter().zip(call_pages.into_iter()) {
+            if Self::check_balance(&tx, loaded_pages, &call_pages) {
+                for ((pre, post), _) in loaded_pages
+                    .into_iter()
+                    .zip(call_pages.into_iter())
+                    .zip(tx.keys.iter())
+                {
                     **pre = post;
                 }
             }
