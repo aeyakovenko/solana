@@ -909,16 +909,21 @@ mod test {
                 (t, send)
             })
             .collect();
+        //warmup
+        for thread in 0..T {
+            let tt = ttx.pop().unwrap();
+            threads[thread].1.send(tt).unwrap();
+        }
+        for _ in 0..T {
+            recv_answer.recv().unwrap();
+        }
 
-        let mut start = Instant::now();
-        for thread in 0..count {
+        let start = Instant::now();
+        for thread in T..count {
             let tt = ttx.pop().unwrap();
             threads[thread % T].1.send(tt).unwrap();
-            if thread == T {
-                start = Instant::now();
-            }
         }
-        for _ in 0..count {
+        for thread in T..count {
             recv_answer.recv().unwrap();
         }
         let done = start.elapsed();
