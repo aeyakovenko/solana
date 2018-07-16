@@ -304,7 +304,7 @@ pub struct Context {
     lock: Vec<bool>,
     needs_alloc: Vec<bool>,
     checked: Vec<bool>,
-    to_pages: Vec<Vec<Option<usize>>>,
+    pages: Vec<Vec<Option<usize>>>,
     loaded_page_table: Vec<Vec<Page>>,
     commit: Vec<bool>,
 }
@@ -313,14 +313,14 @@ impl Default for Context {
         let lock = vec![false; N];
         let needs_alloc = vec![false; N];
         let checked = vec![false; N];
-        let to_pages = vec![vec![None; K]; N];
+        let pages = vec![vec![None; K]; N];
         let loaded_page_table: Vec<Vec<_>> = vec![vec![Page::default(); K]; N];
         let commit = vec![false; N];
         Context {
             lock,
             needs_alloc,
             checked,
-            to_pages,
+            pages,
             loaded_page_table,
             commit,
         }
@@ -358,7 +358,7 @@ impl PageTable {
             &transactions,
             &ctx.checked,
             &mut ctx.needs_alloc,
-            &mut ctx.to_pages,
+            &mut ctx.pages,
         );
     }
     pub fn allocate_keys_with_ctx(&self, transactions: &Vec<Call>, ctx: &mut Context) {
@@ -366,14 +366,14 @@ impl PageTable {
             &transactions,
             &ctx.checked,
             &ctx.needs_alloc,
-            &mut ctx.to_pages,
+            &mut ctx.pages,
         );
     }
     pub fn execute_with_ctx(&self, transactions: &Vec<Call>, ctx: &mut Context) {
         self.load_pages(
             &transactions,
             &mut ctx.checked,
-            &mut ctx.to_pages,
+            &mut ctx.pages,
             &mut ctx.loaded_page_table,
         );
         PageTable::execute(
@@ -642,6 +642,11 @@ impl PageTable {
             }
         }
     }
+    pub fn commit_with_ctx(&self, packet: &Vec<Call>, ctx: &Context) {
+        self.commit(packet, &ctx.commit, &ctx.pages, &ctx.loaded_page_table);
+        self.release_memory_lock(packet, &ctx.lock);
+    }
+
     pub fn get_balance(&self, key: &PublicKey) -> Option<u64> {
         self.allocated_pages.read().unwrap().get_balance(key)
     }
@@ -748,10 +753,10 @@ mod test {
         let mut lock = vec![false; N];
         let mut needs_alloc = vec![false; N];
         let mut checked = vec![false; N];
-        let mut to_pages = vec![vec![None; K]; N];
+        let mut pages = vec![vec![None; K]; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
         pt.validate_call(&transactions, &lock, &mut checked);
-        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
+        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut pages);
         for x in &needs_alloc {
             assert!(x);
         }
@@ -765,10 +770,10 @@ mod test {
         let mut lock = vec![false; N];
         let mut needs_alloc = vec![false; N];
         let mut checked = vec![false; N];
-        let mut to_pages = vec![vec![None; K]; N];
+        let mut pages = vec![vec![None; K]; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
         pt.validate_call(&transactions, &lock, &mut checked);
-        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
+        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut pages);
         for x in &needs_alloc {
             assert!(!x);
         }
@@ -781,14 +786,14 @@ mod test {
         let mut lock = vec![false; N];
         let mut needs_alloc = vec![false; N];
         let mut checked = vec![false; N];
-        let mut to_pages = vec![vec![None; K]; N];
+        let mut pages = vec![vec![None; K]; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
         pt.validate_call(&transactions, &lock, &mut checked);
-        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
-        pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
+        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut pages);
+        pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut pages);
         for (i, tx) in transactions.iter().enumerate() {
             for (j, _) in tx.keys.iter().enumerate() {
-                assert!(to_pages[i][j].is_some());
+                assert!(pages[i][j].is_some());
             }
         }
     }
@@ -801,22 +806,22 @@ mod test {
         let mut lock = vec![false; N];
         let mut needs_alloc = vec![false; N];
         let mut checked = vec![false; N];
-        let mut to_pages = vec![vec![None; K]; N];
+        let mut pages = vec![vec![None; K]; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
         pt.validate_call(&transactions, &lock, &mut checked);
-        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
+        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut pages);
         for a in &needs_alloc {
             assert!(!a);
         }
         for (i, tx) in transactions.iter().enumerate() {
             for (j, _) in tx.keys.iter().enumerate() {
-                assert!(to_pages[i][j].is_some());
+                assert!(pages[i][j].is_some());
             }
         }
-        pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
+        pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut pages);
         for (i, tx) in transactions.iter().enumerate() {
             for (j, _) in tx.keys.iter().enumerate() {
-                assert!(to_pages[i][j].is_some());
+                assert!(pages[i][j].is_some());
             }
         }
     }
@@ -829,23 +834,23 @@ mod test {
         let mut lock = vec![false; N];
         let mut needs_alloc = vec![false; N];
         let mut checked = vec![false; N];
-        let mut to_pages = vec![vec![None; K]; N];
+        let mut pages = vec![vec![None; K]; N];
         let mut loaded_page_table: Vec<Vec<_>> = vec![vec![Page::default(); K]; N];
         let mut commit = vec![false; N];
         pt.acquire_memory_lock(&transactions, &mut lock);
         pt.validate_call(&transactions, &lock, &mut checked);
-        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
-        pt.sanity_check_pages(&transactions, &checked, &to_pages);
-        pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
-        pt.sanity_check_pages(&transactions, &checked, &to_pages);
+        pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut pages);
+        pt.sanity_check_pages(&transactions, &checked, &pages);
+        pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut pages);
+        pt.sanity_check_pages(&transactions, &checked, &pages);
         pt.load_pages(
             &transactions,
             &mut checked,
-            &mut to_pages,
+            &mut pages,
             &mut loaded_page_table,
         );
         PageTable::execute(&transactions, &checked, &mut loaded_page_table, &mut commit);
-        pt.commit(&transactions, &commit, &to_pages, &loaded_page_table);
+        pt.commit(&transactions, &commit, &pages, &loaded_page_table);
         pt.release_memory_lock(&transactions, &lock);
         for (i, x) in transactions.iter().enumerate() {
             assert!(checked[i]);
@@ -924,7 +929,7 @@ mod test {
                         lpt.commit(
                             &transactions,
                             &ctx.commit,
-                            &ctx.to_pages,
+                            &ctx.pages,
                             &ctx.loaded_page_table,
                         );
                         lpt.release_memory_lock(&transactions, &ctx.lock);
@@ -985,18 +990,18 @@ mod test {
                             &transactions,
                             &ctx.checked,
                             &mut ctx.needs_alloc,
-                            &mut ctx.to_pages,
+                            &mut ctx.pages,
                         );
                         lpt.allocate_keys(
                             &transactions,
                             &ctx.checked,
                             &ctx.needs_alloc,
-                            &mut ctx.to_pages,
+                            &mut ctx.pages,
                         );
                         lpt.load_pages(
                             &transactions,
                             &mut ctx.checked,
-                            &mut ctx.to_pages,
+                            &mut ctx.pages,
                             &mut ctx.loaded_page_table,
                         );
                         PageTable::execute(
@@ -1008,7 +1013,7 @@ mod test {
                         lpt.commit(
                             &transactions,
                             &ctx.commit,
-                            &ctx.to_pages,
+                            &ctx.pages,
                             &ctx.loaded_page_table,
                         );
                         lpt.release_memory_lock(&transactions, &ctx.lock);
@@ -1188,7 +1193,7 @@ mod bench {
             pt.commit(
                 &transactions,
                 &ctx.commit,
-                &ctx.to_pages,
+                &ctx.pages,
                 &ctx.loaded_page_table,
             );
             pt.release_memory_lock(&transactions, &ctx.lock);
@@ -1216,7 +1221,7 @@ mod bench {
             pt.commit(
                 &transactions,
                 &ctx.commit,
-                &ctx.to_pages,
+                &ctx.pages,
                 &ctx.loaded_page_table,
             );
             pt.release_memory_lock(&transactions, &ctx.lock);

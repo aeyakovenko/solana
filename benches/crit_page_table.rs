@@ -5,7 +5,7 @@ extern crate solana;
 
 use criterion::Criterion;
 use rand::{thread_rng, RngCore};
-use solana::page_table::{Call, Context, Page, PageTable, N};
+use solana::page_table::{Call, Context, PageTable, N};
 
 fn bench_load_and_execute(criterion: &mut Criterion) {
     criterion.bench_function("bench_load_and_execute", move |b| {
@@ -25,13 +25,7 @@ fn bench_load_and_execute(criterion: &mut Criterion) {
             pt.acquire_validate_find(&transactions, &mut ctx);
             pt.allocate_keys_with_ctx(&transactions, &mut ctx);
             pt.execute_with_ctx(&transactions, &mut ctx);
-            pt.commit(
-                &transactions,
-                &ctx.commit,
-                &ctx.to_pages,
-                &ctx.loaded_page_table,
-            );
-            pt.release_memory_lock(&transactions, &ctx.lock);
+            pt.commit_with_ctx(&transactions, &ctx);
         });
     });
 }
