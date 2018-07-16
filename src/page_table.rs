@@ -249,8 +249,6 @@ pub struct AllocatedPages {
     max: usize,
     allocated: BTreeMap<PublicKey, usize>,
     free: Vec<usize>,
-    /// entries of Pages
-    pub page_table: Vec<Page>,
 }
 
 impl AllocatedPages {
@@ -259,17 +257,10 @@ impl AllocatedPages {
             max: 0,
             allocated: BTreeMap::new(),
             free: vec![],
-            page_table: vec![],
         }
     }
     pub fn lookup(&self, key: &PublicKey) -> Option<usize> {
         self.allocated.get(key).cloned().map(|x| x as usize)
-    }
-    pub fn get_balance(&self, key: &PublicKey) -> Option<u64> {
-        self.lookup(key).map(|dx| self.page_table[dx].balance)
-    }
-    pub fn get_version(&self, key: &PublicKey) -> Option<u64> {
-        self.lookup(key).map(|dx| self.page_table[dx].version)
     }
 
     pub fn free(&mut self, key: &PublicKey) {
@@ -296,6 +287,8 @@ pub struct PageTable {
     allocated_pages: RwLock<AllocatedPages>,
     /// locked pages that are currently processed
     mem_locks: Mutex<HashSet<PublicKey, FastHasher>>,
+    /// entries of Pages
+    page_table: RwLock<Vec<Page>>,
 }
 
 pub const N: usize = 256;
@@ -331,6 +324,7 @@ impl PageTable {
         PageTable {
             allocated_pages: RwLock::new(AllocatedPages::new()),
             mem_locks: Mutex::new(HashSet::with_hasher(FastHasher::new())),
+            page_table: RwLock::new(vec![]),
         }
     }
     // for each call in the packet acquire the memory lock for the pages it references if possible
@@ -391,8 +385,8 @@ impl PageTable {
         acquired_memory: &Vec<bool>,
         checked: &mut Vec<bool>,
     ) {
-        //holds page table READ lock
         let allocated_pages = self.allocated_pages.read().unwrap();
+        let page_table = self.page_table.read().unwrap();
         for (i, tx) in packet.iter().enumerate() {
             checked[i] = false;
             if !acquired_memory[i] {
@@ -400,7 +394,7 @@ impl PageTable {
             }
             let caller = &tx.keys[0];
             if let Some(memix) = allocated_pages.lookup(caller) {
-                if let Some(page) = allocated_pages.page_table.get(memix) {
+                if let Some(page) = page_table.get(memix) {
                     assert_eq!(page.owner, *caller);
                     // skip calls that are to old
                     // this check prevents retransmitted transactions from being processed
@@ -443,6 +437,7 @@ impl PageTable {
     }
     pub fn force_allocate(&self, packet: &Vec<Call>, owner: bool, amount: u64) {
         let mut allocated_pages = self.allocated_pages.write().unwrap();
+        let mut page_table = self.page_table.write().unwrap();
         for tx in packet.iter() {
             let key = if owner {
                 tx.keys[0]
@@ -451,10 +446,10 @@ impl PageTable {
             };
             let page = Page::new(key, tx.contract, amount);
             let ix = allocated_pages.allocate(key) as usize;
-            if allocated_pages.page_table.len() <= ix {
-                allocated_pages.page_table.resize(ix + 1, page);
+            if page_table.len() <= ix {
+                page_table.resize(ix + 1, page);
             } else {
-                allocated_pages.page_table[ix] = page;
+                page_table[ix] = page;
             }
         }
     }
@@ -464,7 +459,7 @@ impl PageTable {
         checked: &Vec<bool>,
         pages: &Vec<Vec<Option<usize>>>,
     ) {
-        let allocated_pages = self.allocated_pages.read().unwrap();
+        let page_table = self.page_table.read().unwrap();
         //while we hold the write lock, this is where we can create another anonymouns page
         //with copy and write, and send this table to the vote signer
         for (i, tx) in txs.iter().enumerate() {
@@ -473,7 +468,7 @@ impl PageTable {
             }
             for (p, k) in pages[i].iter().zip(&tx.keys) {
                 if p.is_some() {
-                    assert_eq!(*k, allocated_pages.page_table[p.unwrap()].owner);
+                    assert_eq!(*k, page_table[p.unwrap()].owner);
                 }
             }
         }
@@ -486,9 +481,7 @@ impl PageTable {
         pages: &mut Vec<Vec<Option<usize>>>,
     ) {
         let mut allocated_pages = self.allocated_pages.write().unwrap();
-        //holds WRITE lock to the page table, since we are adding keys and resizing the table here
-        //while we hold the write lock, this is where we can create another anonymouns page
-        //with copy and write, and send this table to the vote signer
+        let mut page_table = self.page_table.write().unwrap();
         for (i, tx) in packet.iter().enumerate() {
             if !checked[i] {
                 continue;
@@ -508,14 +501,14 @@ impl PageTable {
                     memhash: [0, 0, 0, 0],
                     memory: vec![],
                 };
-                //safe to do while the WRITE lock is held
                 let ix = allocated_pages.allocate(*key) as usize;
-                if allocated_pages.page_table.len() <= ix {
+                //recheck since we are getting a new lock
+                if page_table.len() <= ix {
                     trace!("reallocating page table {}", ix);
                     //safe to do while the WRITE lock is held
-                    allocated_pages.page_table.resize(ix + 1, Page::default());
+                    page_table.resize(ix + 1, Page::default());
                 }
-                allocated_pages.page_table[ix] = page;
+                page_table[ix] = page;
                 pages[i][j] = Some(ix);
             }
         }
@@ -528,14 +521,14 @@ impl PageTable {
         pages: &Vec<Vec<Option<usize>>>,
         loaded_page_table: &mut Vec<Vec<Page>>,
     ) {
-        let allocated_pages = self.allocated_pages.read().unwrap();
+        let page_table = self.page_table.read().unwrap();
         for (i, check) in checked.into_iter().enumerate() {
             if !*check {
                 continue;
             }
             for (j, (_, oix)) in packet[i].keys.iter().zip(pages[i].iter()).enumerate() {
                 let ix = oix.expect("checked pages should be loadable");
-                loaded_page_table[i][j] = allocated_pages.page_table[ix].clone();
+                loaded_page_table[i][j] = page_table[ix].clone();
             }
         }
     }
@@ -631,14 +624,14 @@ impl PageTable {
         pages: &Vec<Vec<Option<usize>>>,
         loaded_page_table: &Vec<Vec<Page>>,
     ) {
-        let mut allocated_pages = self.allocated_pages.write().unwrap();
+        let mut page_table = self.page_table.write().unwrap();
         for (i, commit) in commits.into_iter().enumerate() {
             if !*commit {
                 continue;
             }
             for (j, (_, oix)) in packet[i].keys.iter().zip(pages[i].iter()).enumerate() {
                 let ix = oix.expect("checked pages should be loadable");
-                allocated_pages.page_table[ix] = loaded_page_table[i][j].clone();
+                page_table[ix] = loaded_page_table[i][j].clone();
             }
         }
     }
@@ -648,10 +641,14 @@ impl PageTable {
     }
 
     pub fn get_balance(&self, key: &PublicKey) -> Option<u64> {
-        self.allocated_pages.read().unwrap().get_balance(key)
+        let ap = self.allocated_pages.read().unwrap();
+        let pt = self.page_table.read().unwrap();
+        ap.lookup(key).map(|dx| pt[dx].balance)
     }
     pub fn get_version(&self, key: &PublicKey) -> Option<u64> {
-        self.allocated_pages.read().unwrap().get_version(key)
+        let ap = self.allocated_pages.read().unwrap();
+        let pt = self.page_table.read().unwrap();
+        ap.lookup(key).map(|dx| pt[dx].version)
     }
     pub fn release_memory_lock(&self, packet: &Vec<Call>, lock: &Vec<bool>) {
         //holds mem_locks mutex
@@ -867,7 +864,7 @@ mod test {
     fn load_and_execute_pipeline_bench() {
         let context_recycler = ContextRecycler::default();
         let pt = PageTable::new();
-        let count = 1000;
+        let count = 10000;
         let mut ttx: Vec<Vec<Call>> = (0..count)
             .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
             .collect();
@@ -967,7 +964,7 @@ mod test {
     fn load_and_execute_mt_bench() {
         const T: usize = 3;
         let pt = PageTable::new();
-        let count = 1000;
+        let count = 10000;
         let mut ttx: Vec<Vec<Call>> = (0..count)
             .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
             .collect();
@@ -984,39 +981,10 @@ mod test {
                 let t = spawn(move || {
                     let mut ctx = Context::default();
                     for transactions in recv.iter() {
-                        lpt.acquire_memory_lock(&transactions, &mut ctx.lock);
-                        lpt.validate_call(&transactions, &ctx.lock, &mut ctx.checked);
-                        lpt.find_new_keys(
-                            &transactions,
-                            &ctx.checked,
-                            &mut ctx.needs_alloc,
-                            &mut ctx.pages,
-                        );
-                        lpt.allocate_keys(
-                            &transactions,
-                            &ctx.checked,
-                            &ctx.needs_alloc,
-                            &mut ctx.pages,
-                        );
-                        lpt.load_pages(
-                            &transactions,
-                            &mut ctx.checked,
-                            &mut ctx.pages,
-                            &mut ctx.loaded_page_table,
-                        );
-                        PageTable::execute(
-                            &transactions,
-                            &ctx.checked,
-                            &mut ctx.loaded_page_table,
-                            &mut ctx.commit,
-                        );
-                        lpt.commit(
-                            &transactions,
-                            &ctx.commit,
-                            &ctx.pages,
-                            &ctx.loaded_page_table,
-                        );
-                        lpt.release_memory_lock(&transactions, &ctx.lock);
+                        lpt.acquire_validate_find(&transactions, &mut ctx);
+                        lpt.allocate_keys_with_ctx(&transactions, &mut ctx);
+                        lpt.execute_with_ctx(&transactions, &mut ctx);
+                        lpt.commit_with_ctx(&transactions, &ctx);
                         response.send(()).unwrap();
                     }
                 });
