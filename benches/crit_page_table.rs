@@ -9,7 +9,7 @@ use solana::page_table::{Call, Context, PageTable, N};
 
 fn bench_load_and_execute(criterion: &mut Criterion) {
     criterion.bench_function("bench_load_and_execute", move |b| {
-        let mut pt = PageTable::new();
+        let pt = PageTable::new();
         let mut ttx: Vec<Vec<_>> = (0..N)
             .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
             .collect();
@@ -18,7 +18,7 @@ fn bench_load_and_execute(criterion: &mut Criterion) {
         }
         let mut ctx = Context::default();
         b.iter(|| {
-            let transactions = &mut ttx[thread_rng().next_u64() as usize % ttx.len()];
+            let transactions = &mut ttx[thread_rng().next_u64() as usize % N];
             for tx in transactions.iter_mut() {
                 tx.version += 1;
             }
