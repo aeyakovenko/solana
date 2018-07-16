@@ -1021,6 +1021,9 @@ mod bench {
     use self::test::Bencher;
     use page_table::{self, Call, Context, PageTable, N};
     use rand::{thread_rng, RngCore};
+    use std::sync::mpsc::channel;
+    use std::sync::Arc;
+    use std::thread::spawn;
 
     #[bench]
     fn update_version_baseline(bencher: &mut Bencher) {
@@ -1192,6 +1195,58 @@ mod bench {
             pt.load_pages_with_ctx(&transactions, &mut ctx);
             PageTable::execute_with_ctx(&transactions, &mut ctx);
             pt.commit_release_with_ctx(&transactions, &ctx);
+        });
+    }
+    #[bench]
+    fn load_and_execute_mt3_bench(bencher: &mut Bencher) {
+        const T: usize = 3;
+        let pt = PageTable::new();
+        let count = 10000;
+        let mut ttx: Vec<Vec<Call>> = (0..count)
+            .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
+            .collect();
+        for tx in &ttx {
+            pt.force_allocate(tx, true, 1_000_000);
+        }
+        let (send_answer, recv_answer) = channel();
+        let spt = Arc::new(pt);
+        let threads: Vec<_> = (0..T)
+            .map(|_| {
+                let (send, recv) = channel();
+                let response = send_answer.clone();
+                let lpt = spt.clone();
+                let t = spawn(move || {
+                    let mut ctx = Context::default();
+                    for transactions in recv.iter() {
+                        lpt.acquire_validate_find(&transactions, &mut ctx);
+                        lpt.allocate_keys_with_ctx(&transactions, &mut ctx);
+                        lpt.load_pages_with_ctx(&transactions, &mut ctx);
+                        PageTable::execute_with_ctx(&transactions, &mut ctx);
+                        lpt.commit_release_with_ctx(&transactions, &ctx);
+                        response.send(()).unwrap();
+                    }
+                });
+                (t, send)
+            })
+            .collect();
+        //warmup
+        for thread in 0..T {
+            let tt = ttx.pop().unwrap();
+            threads[thread].1.send(tt).unwrap();
+        }
+        for _ in 0..T {
+            recv_answer.recv().unwrap();
+        }
+        let mut thread = 0;
+        bencher.iter(move || {
+            for thread in 0..T {
+                let tt = ttx.pop().unwrap();
+                threads[thread].1.send(tt).unwrap();
+            }
+            for _ in 0..T {
+                recv_answer.recv().unwrap();
+            }
+            thread += T;
         });
     }
 }

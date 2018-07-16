@@ -24,8 +24,8 @@ fn bench_load_and_execute(criterion: &mut Criterion) {
             }
             pt.acquire_validate_find(&transactions, &mut ctx);
             pt.allocate_keys_with_ctx(&transactions, &mut ctx);
-            pt.execute_with_ctx(&transactions, &mut ctx);
-            pt.commit_with_ctx(&transactions, &ctx);
+            PageTable::execute_with_ctx(&transactions, &mut ctx);
+            pt.commit_release_with_ctx(&transactions, &ctx);
         });
     });
 }
