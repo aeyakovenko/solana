@@ -293,7 +293,7 @@ pub struct PageTable {
     page_table: RwLock<Vec<Page>>,
 }
 
-pub const N: usize = 256;
+pub const N: usize = 512;
 pub const K: usize = 16;
 pub struct Context {
     lock: Vec<bool>,
@@ -954,7 +954,7 @@ mod test {
     }
     #[test]
     fn load_and_execute_mt_bench() {
-        const T: usize = 32;
+        const T: usize = 1;
         let pt = PageTable::new();
         let count = 10000;
         let mut ttx: Vec<Vec<Call>> = (0..count)
