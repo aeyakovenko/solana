@@ -365,13 +365,7 @@ impl PageTable {
             &mut ctx.pages,
         );
     }
-    pub fn execute_with_ctx(&self, transactions: &Vec<Call>, ctx: &mut Context) {
-        self.load_pages(
-            &transactions,
-            &mut ctx.checked,
-            &mut ctx.pages,
-            &mut ctx.loaded_page_table,
-        );
+    pub fn execute_with_ctx(transactions: &Vec<Call>, ctx: &mut Context) {
         PageTable::execute(
             &transactions,
             &ctx.checked,
@@ -649,7 +643,7 @@ impl PageTable {
             }
         }
     }
-    pub fn commit_with_ctx(&self, packet: &Vec<Call>, ctx: &Context) {
+    pub fn commit_release_with_ctx(&self, packet: &Vec<Call>, ctx: &Context) {
         self.commit(packet, &ctx.commit, &ctx.pages, &ctx.loaded_page_table);
         self.release_memory_lock(packet, &ctx.lock);
     }
@@ -913,18 +907,18 @@ mod test {
                     {
                         let mut ctx = octx.write().unwrap();
                         lpt.allocate_keys_with_ctx(&transactions, &mut ctx);
+                        lpt.load_pages_with_ctx(&transactions, &mut ctx);
                     }
                     send_execute.send((transactions, octx)).unwrap();
                 }
             });
         };
         let _executor = {
-            let lpt = spt.clone();
             spawn(move || {
                 for (transactions, octx) in recv_execute.iter() {
                     {
                         let mut ctx = octx.write().unwrap();
-                        lpt.execute_with_ctx(&transactions, &mut ctx);
+                        PageTable::execute_with_ctx(&transactions, &mut ctx);
                     }
                     send_commit.send((transactions, octx)).unwrap();
                 }
@@ -937,13 +931,7 @@ mod test {
                 for (transactions, octx) in recv_commit.iter() {
                     {
                         let ctx = octx.read().unwrap();
-                        lpt.commit(
-                            &transactions,
-                            &ctx.commit,
-                            &ctx.pages,
-                            &ctx.loaded_page_table,
-                        );
-                        lpt.release_memory_lock(&transactions, &ctx.lock);
+                        lpt.commit_release_with_ctx(&transactions, &ctx);
                         send_answer.send(()).unwrap();
                     }
                     recycler.recycle(octx);
@@ -997,8 +985,9 @@ mod test {
                     for transactions in recv.iter() {
                         lpt.acquire_validate_find(&transactions, &mut ctx);
                         lpt.allocate_keys_with_ctx(&transactions, &mut ctx);
-                        lpt.execute_with_ctx(&transactions, &mut ctx);
-                        lpt.commit_with_ctx(&transactions, &ctx);
+                        lpt.load_pages_with_ctx(&transactions, &mut ctx);
+                        PageTable::execute_with_ctx(&transactions, &mut ctx);
+                        lpt.commit_release_with_ctx(&transactions, &ctx);
                         response.send(()).unwrap();
                     }
                 });
@@ -1187,8 +1176,9 @@ mod bench {
             }
             pt.acquire_validate_find(&transactions, &mut ctx);
             pt.allocate_keys_with_ctx(&transactions, &mut ctx);
-            pt.execute_with_ctx(&transactions, &mut ctx);
-            pt.commit_with_ctx(&transactions, &ctx);
+            pt.load_pages_with_ctx(&transactions, &mut ctx);
+            PageTable::execute_with_ctx(&transactions, &mut ctx);
+            pt.commit_release_with_ctx(&transactions, &ctx);
         });
     }
     #[bench]
@@ -1209,8 +1199,9 @@ mod bench {
             }
             pt.acquire_validate_find(&transactions, &mut ctx);
             pt.allocate_keys_with_ctx(&transactions, &mut ctx);
-            pt.execute_with_ctx(&transactions, &mut ctx);
-            pt.commit_with_ctx(&transactions, &ctx);
+            pt.load_pages_with_ctx(&transactions, &mut ctx);
+            PageTable::execute_with_ctx(&transactions, &mut ctx);
+            pt.commit_release_with_ctx(&transactions, &ctx);
         });
     }
 }
