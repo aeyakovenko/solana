@@ -1,5 +1,5 @@
 use bincode::serialize;
-use page_table::{Hash, Tx};
+use page_table::{Call, Hash};
 use result::Result;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -46,7 +46,6 @@ pub struct PoH {
 }
 
 /// Points to indexes into the Record structure
-#[repr(C)]
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct PohEntry {
     /// hash produced by PoH process
@@ -91,6 +90,7 @@ impl PoH {
                 record_hash: record_hash,
             };
             let bytes = serialize(&entry).unwrap();
+            //should always be the same size
             self.bytes_written += bytes.len();
             self.entries_written += 1;
             self.poh_file.write(&bytes)?;
@@ -103,7 +103,7 @@ impl PoH {
 
 impl Ledger {
     pub fn new() -> Self {}
-    pub fn output(&mut self, blob: &Vec<Tx>) -> Result<()> {
+    pub fn output(&mut self, blob: &Vec<Call>) -> Result<()> {
         let (hash, pos) = self.record.insert(blob)?;
         self.poh.insert(hash, pos as u64)?;
         Ok(())
