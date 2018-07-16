@@ -532,6 +532,9 @@ impl PageTable {
             }
         }
     }
+    pub fn load_pages_with_ctx(&self, packet: &Vec<Call>, ctx: &mut Context) {
+        self.load_pages(packet, &ctx.checked, &ctx.pages, &mut ctx.loaded_page_table);
+    }
 
     /// calculate the balances in the loaded pages
     /// at the end of the contract the balance must be the same
@@ -1142,6 +1145,22 @@ mod bench {
             }
             pt.acquire_validate_find(&transactions, &mut ctx);
             pt.allocate_keys_with_ctx(&transactions, &mut ctx);
+            pt.release_memory_lock(&transactions, &ctx.lock);
+        });
+    }
+    #[bench]
+    fn load_pages(bencher: &mut Bencher) {
+        let pt = PageTable::new();
+        let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
+        pt.force_allocate(&transactions, true, 1_000_000);
+        let mut ctx = Context::default();
+        bencher.iter(move || {
+            for tx in &mut transactions {
+                tx.version += 1;
+            }
+            pt.acquire_validate_find(&transactions, &mut ctx);
+            pt.allocate_keys_with_ctx(&transactions, &mut ctx);
+            pt.load_pages_with_ctx(&transactions, &mut ctx);
             pt.release_memory_lock(&transactions, &ctx.lock);
         });
     }
