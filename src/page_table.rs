@@ -21,6 +21,8 @@ use std::hash::{BuildHasher, Hasher};
 use std::sync::{Mutex, RwLock};
 
 //run with 'cargo +nightly bench --features=unstable,parex page_table::bench'
+#[cfg(feature = "parex")]
+use rayon::prelude::*;
 
 //these types vs just u64 had a 40% impact on perf without FastHasher
 type Hash = [u64; 4];
@@ -569,12 +571,20 @@ impl PageTable {
         loaded_page_table: &mut Vec<Vec<Page>>,
         commit: &mut Vec<bool>,
     ) {
+        #[cfg(not(feature = "parex"))]
         let iter = packet
             .into_iter()
             .zip(loaded_page_table)
             .zip(checked)
-            .enumerate();
-        iter.for_each(|(i, ((tx, loaded_pages), checked))| {
+            .zip(commit);
+        #[cfg(feature = "parex")]
+        let iter = packet
+            .into_par_iter()
+            .zip(loaded_page_table)
+            .zip(checked)
+            .zip(commit);
+
+        iter.for_each(|(((tx, loaded_pages), checked), commit)| {
             if !checked {
                 return;
             }
@@ -608,7 +618,7 @@ impl PageTable {
             if !Self::validate_balances(&tx, &loaded_pages, &call_pages) {
                 return;
             }
-            commit[i] = true;
+            *commit = true;
             //commit
             for (pre, post) in loaded_pages.iter_mut().zip(call_pages.into_iter()) {
                 *pre = post;
