@@ -108,5 +108,5 @@ name = "streamer"
 harness = false
 
 [[bench]]
-name = "page_table"
+name = "crit_page_table"
 harness = false
