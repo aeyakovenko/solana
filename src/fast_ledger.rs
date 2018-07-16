@@ -7,21 +7,21 @@ use std::sync::mpsc::{Receiver, Sender};
 
 pub struct Ledger {
     /// append only array of Call structures
-    record: Record,
+    tx_writer: TransactionWriter,
     /// state machine for transactions and contract memory
-    poh: PoH,
+    poh_writer: PoHWriter,
 }
 
-pub struct Record {
+pub struct TransactionWriter {
     /// a slice of Call, that is appended to
     records: BufWriter<File>,
     height: usize,
 }
 
-impl Record {
+impl TransactionWriter {
     /// write a blob to the record, and return the hash of the blob and the index at which it was
     /// inserted into the record
-    pub fn insert(&mut self, blob: &Vec<Tx>) -> Result<(Hash, u64)> {
+    pub fn write(&mut self, blob: &Vec<Tx>) -> Result<(Hash, u64)> {
         let len = blob.len();
         //TODO: compute real hash
         let hash = [self.height as u64, 0, 0, 0];
@@ -34,7 +34,7 @@ impl Record {
     }
 }
 
-pub struct PoH {
+pub struct PoHWriter {
     /// number of hashes to produce for each entry
     num_hashes: u64,
     poh_file: BufWriter<File>,
@@ -56,9 +56,10 @@ pub struct PohEntry {
     record_index: u64,
 }
 
-impl PoH {
+impl PoHWriter {
+    pub new(
     /// mix in the hash and record offset into the poh_file
-    pub fn insert(&mut self, record_hash: Hash, record_index: u64) -> Result<()> {
+    pub fn write(&mut self, record_hash: Hash, record_index: u64) -> Result<()> {
         self.sender.send((record_hash, record_index))?;
         Ok(())
     }
@@ -104,8 +105,8 @@ impl PoH {
 impl Ledger {
     pub fn new() -> Self {}
     pub fn output(&mut self, blob: &Vec<Call>) -> Result<()> {
-        let (hash, pos) = self.record.insert(blob)?;
-        self.poh.insert(hash, pos as u64)?;
+        let (hash, pos) = self.tx_writer.write(blob)?;
+        self.poh_writer.write(hash, pos as u64)?;
         Ok(())
     }
 }
