@@ -1190,13 +1190,7 @@ mod bench {
             pt.acquire_validate_find(&transactions, &mut ctx);
             pt.allocate_keys_with_ctx(&transactions, &mut ctx);
             pt.execute_with_ctx(&transactions, &mut ctx);
-            pt.commit(
-                &transactions,
-                &ctx.commit,
-                &ctx.pages,
-                &ctx.loaded_page_table,
-            );
-            pt.release_memory_lock(&transactions, &ctx.lock);
+            pt.commit_with_ctx(&transactions, &ctx);
         });
     }
     #[bench]
@@ -1218,13 +1212,7 @@ mod bench {
             pt.acquire_validate_find(&transactions, &mut ctx);
             pt.allocate_keys_with_ctx(&transactions, &mut ctx);
             pt.execute_with_ctx(&transactions, &mut ctx);
-            pt.commit(
-                &transactions,
-                &ctx.commit,
-                &ctx.pages,
-                &ctx.loaded_page_table,
-            );
-            pt.release_memory_lock(&transactions, &ctx.lock);
+            pt.commit_with_ctx(&transactions, &ctx);
         });
     }
 }
