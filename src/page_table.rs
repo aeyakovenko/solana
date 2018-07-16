@@ -293,7 +293,7 @@ pub struct PageTable {
     page_table: RwLock<Vec<Page>>,
 }
 
-pub const N: usize = 128;
+pub const N: usize = 256;
 pub const K: usize = 16;
 pub struct Context {
     lock: Vec<bool>,
@@ -1019,6 +1019,7 @@ mod test {
 mod bench {
     extern crate test;
     use self::test::Bencher;
+    use packet::Recycler;
     use page_table::{self, Call, Context, PageTable, N};
     use rand::{thread_rng, RngCore};
     use std::sync::mpsc::channel;
@@ -1198,7 +1199,7 @@ mod bench {
         });
     }
     #[bench]
-    fn load_and_execute_mt3_bench(bencher: &mut Bencher) {
+    fn load_and_execute_mt3_experimental(bencher: &mut Bencher) {
         const T: usize = 3;
         let pt = PageTable::new();
         let count = 10000;
@@ -1247,6 +1248,82 @@ mod bench {
                 recv_answer.recv().unwrap();
             }
             thread += T;
+        });
+    }
+    type ContextRecycler = Recycler<Context>;
+    #[bench]
+    fn load_and_execute_pipeline_experimental(bencher: &mut Bencher) {
+        let context_recycler = ContextRecycler::default();
+        let pt = PageTable::new();
+        let count = 10000;
+        const STAGES: usize = 3;
+        let mut ttx: Vec<Vec<Call>> = (0..count)
+            .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
+            .collect();
+        for tx in &ttx {
+            pt.force_allocate(tx, true, 1_000_000);
+        }
+        let (send_transactions, recv_transactions) = channel();
+        let (send_execute, recv_execute) = channel();
+        let (send_commit, recv_commit) = channel();
+        let (send_answer, recv_answer) = channel();
+        let spt = Arc::new(pt);
+
+        let _reader = {
+            let lpt = spt.clone();
+            let recycler = context_recycler.clone();
+            spawn(move || {
+                for transactions in recv_transactions.iter() {
+                    let octx = recycler.allocate();
+                    {
+                        let mut ctx = octx.write().unwrap();
+                        lpt.acquire_validate_find(&transactions, &mut ctx);
+                        lpt.allocate_keys_with_ctx(&transactions, &mut ctx);
+                        lpt.load_pages_with_ctx(&transactions, &mut ctx);
+                    }
+                    send_execute.send((transactions, octx)).unwrap();
+                }
+            })
+        };
+        let _executor = {
+            spawn(move || {
+                for (transactions, octx) in recv_execute.iter() {
+                    {
+                        let mut ctx = octx.write().unwrap();
+                        PageTable::execute_with_ctx(&transactions, &mut ctx);
+                    }
+                    send_commit.send((transactions, octx)).unwrap();
+                }
+            })
+        };
+        let _commiter = {
+            let lpt = spt.clone();
+            let recycler = context_recycler.clone();
+            spawn(move || {
+                for (transactions, octx) in recv_commit.iter() {
+                    {
+                        let ctx = octx.read().unwrap();
+                        lpt.commit_release_with_ctx(&transactions, &ctx);
+                        send_answer.send(()).unwrap();
+                    }
+                    recycler.recycle(octx);
+                }
+            })
+        };
+        //warmup
+        let tt = ttx.pop().unwrap();
+        send_transactions.send(tt).unwrap();
+        recv_answer.recv().unwrap();
+
+        //fill the stages
+        for _ in 0..STAGES {
+            let tt = ttx.pop().unwrap();
+            send_transactions.send(tt).unwrap();
+        }
+        bencher.iter(move || {
+            let tt = ttx.pop().unwrap();
+            send_transactions.send(tt).unwrap();
+            recv_answer.recv().unwrap();
         });
     }
 }
