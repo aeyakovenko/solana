@@ -5,10 +5,7 @@ extern crate solana;
 
 use criterion::Criterion;
 use rand::{thread_rng, RngCore};
-use solana::page_table::{Call, Page, PageTable};
-
-const N: usize = 256;
-const K: usize = 16;
+use solana::page_table::{Call, Context, Page, PageTable, N};
 
 fn bench_load_and_execute(criterion: &mut Criterion) {
     criterion.bench_function("bench_load_and_execute", move |b| {
@@ -19,37 +16,22 @@ fn bench_load_and_execute(criterion: &mut Criterion) {
         for transactions in &ttx {
             pt.force_allocate(transactions, true, 1_000_000);
         }
-        let mut lock = vec![false; N];
-        let mut needs_alloc = vec![false; N];
-        let mut checked = vec![false; N];
-        let mut to_pages = vec![vec![None; K]; N];
-        let mut loaded_page_table: Vec<Vec<_>> = (0..N)
-            .map(|_| {
-                (0..K)
-                    .map(|_| unsafe {
-                        // Fill the loaded_page_table with a dummy reference
-                        let ptr = 0xfefefefefefefefe as *mut Page;
-                        &mut *ptr
-                    })
-                    .collect()
-            })
-            .collect();
+        let mut ctx = Context::default();
         b.iter(|| {
-            let transactions = &mut ttx[thread_rng().next_u64() as usize % N];
+            let transactions = &mut ttx[thread_rng().next_u64() as usize % ttx.len()];
             for tx in transactions.iter_mut() {
                 tx.version += 1;
             }
-            pt.acquire_memory_lock(&transactions, &mut lock);
-            pt.validate_call(&transactions, &lock, &mut checked);
-            pt.find_new_keys(&transactions, &checked, &mut needs_alloc, &mut to_pages);
-            pt.allocate_keys(&transactions, &checked, &needs_alloc, &mut to_pages);
-            pt.load_and_execute(
+            pt.acquire_validate_find(&transactions, &mut ctx);
+            pt.allocate_keys_with_ctx(&transactions, &mut ctx);
+            pt.execute_with_ctx(&transactions, &mut ctx);
+            pt.commit(
                 &transactions,
-                &mut checked,
-                &mut to_pages,
-                &mut loaded_page_table,
+                &ctx.commit,
+                &ctx.to_pages,
+                &ctx.loaded_page_table,
             );
-            pt.release_memory_lock(&transactions, &lock);
+            pt.release_memory_lock(&transactions, &ctx.lock);
         });
     });
 }
