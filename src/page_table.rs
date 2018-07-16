@@ -585,6 +585,7 @@ impl PageTable {
             .zip(commit);
 
         iter.for_each(|(((tx, loaded_pages), checked), commit)| {
+            *commit = false;
             if !checked {
                 return;
             }
