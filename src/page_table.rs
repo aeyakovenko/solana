@@ -911,8 +911,7 @@ mod bench {
     extern crate test;
     use self::test::Bencher;
     use page_table;
-    use page_table::test::random_tx;
-    use page_table::{Page, PageTable};
+    use page_table::{Call, Page, PageTable};
     use rand::{thread_rng, RngCore};
 
     const N: usize = 256;
@@ -1097,22 +1096,22 @@ mod bench {
         let mut pt = PageTable::new();
         let mut transactions: Vec<_> = (0..N).map(|_r| Call::random_tx()).collect();
         pt.force_allocate(&transactions, true, 1_000_000);
+        let mut lock = vec![false; N];
+        let mut needs_alloc = vec![false; N];
+        let mut checked = vec![false; N];
+        let mut to_pages = vec![vec![None; N]; N];
+        let mut loaded_page_table: Vec<Vec<_>> = (0..N)
+            .map(|_| {
+                (0..N)
+                    .map(|_| unsafe {
+                        // Fill the loaded_page_table with a dummy reference
+                        let ptr = 0xfefefefefefefefe as *mut Page;
+                        &mut *ptr
+                    })
+                    .collect()
+            })
+            .collect();
         bencher.iter(move || {
-            let mut lock = vec![false; N];
-            let mut needs_alloc = vec![false; N];
-            let mut checked = vec![false; N];
-            let mut to_pages = vec![vec![None; N]; N];
-            let mut loaded_page_table: Vec<Vec<_>> = (0..N)
-                .map(|_| {
-                    (0..N)
-                        .map(|_| unsafe {
-                            // Fill the loaded_page_table with a dummy reference
-                            let ptr = 0xfefefefefefefefe as *mut Page;
-                            &mut *ptr
-                        })
-                        .collect()
-                })
-                .collect();
             for tx in &mut transactions {
                 tx.version += 1;
             }
@@ -1141,24 +1140,24 @@ mod bench {
             pt.force_allocate(transactions, true, 1_000_000);
         }
         page_table::test::load_and_execute();
-        page_table::test::load_and_execute();
-        bencher.iter(move || {
+        let mut lock = vec![false; N];
+        let mut needs_alloc = vec![false; N];
+        let mut checked = vec![false; N];
+        let mut to_pages = vec![vec![None; N]; N];
+        let mut loaded_page_table: Vec<Vec<_>> = (0..N)
+            .map(|_| {
+                (0..N)
+                    .map(|_| unsafe {
+                        // Fill the loaded_page_table with a dummy reference
+                        let ptr = 0xfefefefefefefefe as *mut Page;
+                        &mut *ptr
+                    })
+                    .collect()
+            })
+            .collect();
+        bencher.iter(|| {
             let transactions = &mut ttx[thread_rng().next_u64() as usize % N];
-            let mut lock = vec![false; N];
-            let mut needs_alloc = vec![false; N];
-            let mut checked = vec![false; N];
-            let mut to_pages = vec![vec![None; N]; N];
-            let mut loaded_page_table: Vec<Vec<_>> = (0..N)
-                .map(|_| {
-                    (0..N)
-                        .map(|_| unsafe {
-                            // Fill the loaded_page_table with a dummy reference
-                            let ptr = 0xfefefefefefefefe as *mut Page;
-                            &mut *ptr
-                        })
-                        .collect()
-                })
-                .collect();
+
             for tx in transactions.iter_mut() {
                 tx.version += 1;
             }
