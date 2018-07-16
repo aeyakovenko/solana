@@ -293,7 +293,7 @@ pub struct PageTable {
     page_table: RwLock<Vec<Page>>,
 }
 
-pub const N: usize = 512;
+pub const N: usize = 128;
 pub const K: usize = 16;
 pub struct Context {
     lock: Vec<bool>,
