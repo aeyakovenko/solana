@@ -579,11 +579,14 @@ impl PageTable {
             .zip(commit);
 
         iter.for_each(|(((tx, loaded_pages), checked), commit)| {
-            *commit = false;
             if !checked {
                 return;
             }
+            // fee is paid
+            *commit = true;
             loaded_pages[0].balance -= tx.fee;
+            loaded_pages[0].version = tx.version;
+
             let mut call_pages: Vec<Page> = tx.keys
                 .iter()
                 .zip(loaded_pages.iter())
@@ -613,12 +616,10 @@ impl PageTable {
             if !Self::validate_balances(&tx, &loaded_pages, &call_pages) {
                 return;
             }
-            *commit = true;
-            //commit
+            // write pages back to memory
             for (pre, post) in loaded_pages.iter_mut().zip(call_pages.into_iter()) {
                 *pre = post;
             }
-            loaded_pages[0].version = tx.version;
         });
     }
 
@@ -870,6 +871,7 @@ mod test {
     type ContextRecycler = Recycler<Context>;
     #[test]
     fn load_and_execute_pipeline_bench() {
+        logger::setup();
         let context_recycler = ContextRecycler::default();
         let pt = PageTable::new();
         let count = 10000;
@@ -880,7 +882,6 @@ mod test {
             pt.force_allocate(tx, true, 1_000_000);
         }
         let (send_transactions, recv_transactions) = channel();
-        let (send_allocate, recv_allocate) = channel();
         let (send_execute, recv_execute) = channel();
         let (send_commit, recv_commit) = channel();
         let (send_answer, recv_answer) = channel();
@@ -895,23 +896,12 @@ mod test {
                     {
                         let mut ctx = octx.write().unwrap();
                         lpt.acquire_validate_find(&transactions, &mut ctx);
-                    }
-                    send_allocate.send((transactions, octx)).unwrap();
-                }
-            })
-        };
-        let _allocator = {
-            let lpt = spt.clone();
-            spawn(move || {
-                for (transactions, octx) in recv_allocate.iter() {
-                    {
-                        let mut ctx = octx.write().unwrap();
                         lpt.allocate_keys_with_ctx(&transactions, &mut ctx);
                         lpt.load_pages_with_ctx(&transactions, &mut ctx);
                     }
                     send_execute.send((transactions, octx)).unwrap();
                 }
-            });
+            })
         };
         let _executor = {
             spawn(move || {
