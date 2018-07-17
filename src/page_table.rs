@@ -679,6 +679,8 @@ mod test {
     use logger;
     use packet::Recycler;
     use page_table::{Call, Context, Page, PageTable, K, N};
+    use rayon::prelude::*;
+    use std::collections::VecDeque;
     use std::sync::mpsc::channel;
     use std::sync::Arc;
     use std::thread::spawn;
@@ -905,12 +907,17 @@ mod test {
         };
         let _executor = {
             spawn(move || {
-                for (transactions, octx) in recv_execute.iter() {
-                    {
+                while let Ok(tx) = recv_execute.recv() {
+                    let mut events = VecDeque::new();
+                    events.push_back(tx);
+                    while let Ok(more) = recv_execute.try_recv() {
+                        events.push_back(more);
+                    }
+                    events.par_iter().for_each(|(transactions, octx)| {
                         let mut ctx = octx.write().unwrap();
                         PageTable::execute_with_ctx(&transactions, &mut ctx);
-                    }
-                    send_commit.send((transactions, octx)).unwrap();
+                    });
+                    send_commit.send(events).unwrap();
                 }
             })
         };
@@ -918,28 +925,31 @@ mod test {
             let lpt = spt.clone();
             let recycler = context_recycler.clone();
             spawn(move || {
-                for (transactions, octx) in recv_commit.iter() {
-                    {
+                for mut events in recv_commit.iter() {
+                    for (transactions, octx) in &events {
                         let ctx = octx.read().unwrap();
-                        lpt.commit_release_with_ctx(&transactions, &ctx);
-                        send_answer.send(()).unwrap();
+                        lpt.commit_release_with_ctx(transactions, &ctx);
                     }
-                    recycler.recycle(octx);
+                    send_answer.send(events.len()).unwrap();
+                    while let Some((_, octx)) = events.pop_front() {
+                        recycler.recycle(octx);
+                    }
+                }
+            })
+        };
+        let _sender = {
+            spawn(move || {
+                while let Some(tt) = ttx.pop() {
+                    send_transactions.send(tt).unwrap();
                 }
             })
         };
         //warmup
-        let tt = ttx.pop().unwrap();
-        send_transactions.send(tt).unwrap();
         recv_answer.recv().unwrap();
-
         let start = Instant::now();
-        for _ in 1..count {
-            let tt = ttx.pop().unwrap();
-            send_transactions.send(tt).unwrap();
-        }
-        for _ in 1..count {
-            recv_answer.recv().unwrap();
+        let mut total = 1;
+        while total < count {
+            total += recv_answer.recv().unwrap();
         }
         let done = start.elapsed();
         let ns = done.as_secs() as usize * 1_000_000_000 + done.subsec_nanos() as usize;
@@ -1022,6 +1032,8 @@ mod bench {
     use packet::Recycler;
     use page_table::{self, Call, Context, PageTable, N};
     use rand::{thread_rng, RngCore};
+    //use rayon::prelude::*;
+    use std::collections::VecDeque;
     use std::sync::mpsc::channel;
     use std::sync::Arc;
     use std::thread::spawn;
@@ -1287,12 +1299,19 @@ mod bench {
         };
         let _executor = {
             spawn(move || {
-                for (transactions, octx) in recv_execute.iter() {
-                    {
+                while let Ok(tx) = recv_execute.recv() {
+                    let mut events = VecDeque::new();
+                    events.push_back(tx);
+                    while let Ok(more) = recv_execute.try_recv() {
+                        events.push_back(more);
+                    }
+                    events.iter().for_each(|(transactions, octx)| {
                         let mut ctx = octx.write().unwrap();
                         PageTable::execute_with_ctx(&transactions, &mut ctx);
+                    });
+                    while let Some((transactions, octx)) = events.pop_front() {
+                        send_commit.send((transactions, octx)).unwrap();
                     }
-                    send_commit.send((transactions, octx)).unwrap();
                 }
             })
         };
@@ -1310,19 +1329,16 @@ mod bench {
                 }
             })
         };
+        let _sender = {
+            spawn(move || {
+                while let Some(tt) = ttx.pop() {
+                    send_transactions.send(tt).unwrap();
+                }
+            })
+        };
         //warmup
-        let tt = ttx.pop().unwrap();
-        send_transactions.send(tt).unwrap();
         recv_answer.recv().unwrap();
-
-        //fill the stages
-        for _ in 0..STAGES {
-            let tt = ttx.pop().unwrap();
-            send_transactions.send(tt).unwrap();
-        }
         bencher.iter(move || {
-            let tt = ttx.pop().unwrap();
-            send_transactions.send(tt).unwrap();
             recv_answer.recv().unwrap();
         });
     }
