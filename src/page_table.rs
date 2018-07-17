@@ -679,6 +679,8 @@ mod test {
     use logger;
     use packet::Recycler;
     use page_table::{Call, Context, Page, PageTable, K, N};
+    use rayon::prelude::*;
+    use std::collections::VecDeque;
     use std::sync::mpsc::channel;
     use std::sync::Arc;
     use std::thread::spawn;
@@ -940,6 +942,97 @@ mod test {
         }
         for _ in 1..count {
             recv_answer.recv().unwrap();
+        }
+        let done = start.elapsed();
+        let ns = done.as_secs() as usize * 1_000_000_000 + done.subsec_nanos() as usize;
+        let total = count * N;
+        println!(
+            "PIPELINE: done {:?} {}ns/packet {}ns/t {} tp/s",
+            done,
+            ns / (count - 1),
+            ns / total,
+            (1_000_000_000 * total) / ns
+        );
+    }
+    #[test]
+    fn load_and_execute_par_pipeline_bench() {
+        logger::setup();
+        let context_recycler = ContextRecycler::default();
+        let pt = PageTable::new();
+        let count = 10000;
+        let mut ttx: Vec<Vec<Call>> = (0..count)
+            .map(|_| (0..N).map(|_r| Call::random_tx()).collect())
+            .collect();
+        for tx in &ttx {
+            pt.force_allocate(tx, true, 1_000_000);
+        }
+        let (send_transactions, recv_transactions) = channel();
+        let (send_execute, recv_execute) = channel();
+        let (send_commit, recv_commit) = channel();
+        let (send_answer, recv_answer) = channel();
+        let spt = Arc::new(pt);
+
+        let _reader = {
+            let lpt = spt.clone();
+            let recycler = context_recycler.clone();
+            spawn(move || {
+                for transactions in recv_transactions.iter() {
+                    let octx = recycler.allocate();
+                    {
+                        let mut ctx = octx.write().unwrap();
+                        lpt.acquire_validate_find(&transactions, &mut ctx);
+                        lpt.allocate_keys_with_ctx(&transactions, &mut ctx);
+                        lpt.load_pages_with_ctx(&transactions, &mut ctx);
+                    }
+                    send_execute.send((transactions, octx)).unwrap();
+                }
+            })
+        };
+        let _executor = {
+            spawn(move || {
+                while let Ok(tx) = recv_execute.recv() {
+                    let mut events = VecDeque::new();
+                    events.push_back(tx);
+                    while let Ok(more) = recv_execute.try_recv() {
+                        events.push_back(more);
+                    }
+                    events.par_iter().for_each(|(transactions, octx)| {
+                        let mut ctx = octx.write().unwrap();
+                        PageTable::execute_with_ctx(&transactions, &mut ctx);
+                    });
+                    send_commit.send(events).unwrap();
+                }
+            })
+        };
+        let _commiter = {
+            let lpt = spt.clone();
+            let recycler = context_recycler.clone();
+            spawn(move || {
+                for mut events in recv_commit.iter() {
+                    for (transactions, octx) in &events {
+                        let ctx = octx.read().unwrap();
+                        lpt.commit_release_with_ctx(transactions, &ctx);
+                    }
+                    send_answer.send(events.len()).unwrap();
+                    while let Some((_, octx)) = events.pop_front() {
+                        recycler.recycle(octx);
+                    }
+                }
+            })
+        };
+        let _sender = {
+            spawn(move || {
+                while let Some(tt) = ttx.pop() {
+                    send_transactions.send(tt).unwrap();
+                }
+            })
+        };
+        //warmup
+        recv_answer.recv().unwrap();
+        let start = Instant::now();
+        let mut total = 1;
+        while total < count {
+            total += recv_answer.recv().unwrap();
         }
         let done = start.elapsed();
         let ns = done.as_secs() as usize * 1_000_000_000 + done.subsec_nanos() as usize;
