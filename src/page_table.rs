@@ -1161,6 +1161,7 @@ mod test {
         load_and_execute_mt_bench(4);
         load_and_execute_mt_bench(8);
         load_and_execute_mt_bench(16);
+        load_and_execute_mt_bench(32);
     }
 }
 
