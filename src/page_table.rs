@@ -36,23 +36,23 @@ const DEFAULT_CONTRACT: [u64; 4] = [0u64; 4];
 /// reallocate
 /// spend the funds from the call to the first recepient
 pub fn system_0_realloc(call: &Call, pages: &mut Vec<Page>) {
-    let size: u64 = deserialize(&call.user_data).unwrap();
-    // TODO(anatoly): add a stage to cleanup any pages that do not hold enough balance for the size
-    // of the page
-    pages[0].memory.resize(size as usize, 0u8);
+    if call.contract == DEFAULT_CONTRACT {
+        let size: u64 = deserialize(&call.user_data).unwrap();
+        pages[0].memory.resize(size as usize, 0u8);
+    }
 }
 /// method 1
 /// assign
 /// assign the page to a contract
 pub fn system_1_assign(call: &Call, pages: &mut Vec<Page>) {
     let contract = deserialize(&call.user_data).unwrap();
-    if call.contract == DEFAULT_CONTRACT || pages[0].contract == call.contract {
+    if call.contract == DEFAULT_CONTRACT {
         pages[0].contract = contract;
+        //zero out the memory in pages[0].memory
+        //Contracts need to own the state of that data otherwise a use could fabricate the state and
+        //manipulate the contract
+        pages[0].memory.clear();
     }
-    //zero out the memory in pages[0].memory
-    //Contracts need to own the state of that data otherwise a use could fabricate the state and
-    //manipulate the contract
-    pages[0].memory.clear();
 }
 /// DEFAULT_CONTRACT interface
 /// All contracts start with 128
@@ -61,8 +61,10 @@ pub fn system_1_assign(call: &Call, pages: &mut Vec<Page>) {
 /// spend the funds from the call to the first recepient
 pub fn default_contract_128_move_funds(call: &Call, pages: &mut Vec<Page>) {
     let amount: u64 = deserialize(&call.user_data).unwrap();
-    pages[0].balance -= amount;
-    pages[1].balance += amount;
+    if pages[0].balance >= amount {
+        pages[0].balance -= amount;
+        pages[1].balance += amount;
+    }
 }
 
 //157,173 ns/iter vs 125,791 ns/iter with using this hasher, 110,000 ns with u64 as the key
