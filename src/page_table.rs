@@ -1094,9 +1094,7 @@ mod test {
             (1_000_000_000 * total) / ns
         );
     }
-    #[test]
-    fn load_and_execute_mt_bench() {
-        const T: usize = 1;
+    pub fn load_and_execute_mt_bench(max_threads: usize) {
         let pt = PageTable::new();
         let count = 10000;
         let mut ttx: Vec<Vec<Call>> = (0..count)
@@ -1107,7 +1105,7 @@ mod test {
         }
         let (send_answer, recv_answer) = channel();
         let spt = Arc::new(pt);
-        let threads: Vec<_> = (0..T)
+        let threads: Vec<_> = (0..max_threads)
             .map(|_| {
                 let (send, recv) = channel();
                 let response = send_answer.clone();
@@ -1126,34 +1124,43 @@ mod test {
                 (t, send)
             })
             .collect();
+        let _sender = {
+            spawn(move || {
+                for thread in 0..count {
+                    let tt = ttx.pop().unwrap();
+                    threads[thread % max_threads].1.send(tt).unwrap();
+                }
+            })
+        };
         //warmup
-        for thread in 0..T {
-            let tt = ttx.pop().unwrap();
-            threads[thread].1.send(tt).unwrap();
-        }
-        for _ in 0..T {
+        for _ in 0..max_threads {
             recv_answer.recv().unwrap();
         }
 
         let start = Instant::now();
-        for thread in T..count {
-            let tt = ttx.pop().unwrap();
-            threads[thread % T].1.send(tt).unwrap();
-        }
-        for _thread in T..count {
+        for _thread in max_threads..count {
             recv_answer.recv().unwrap();
         }
         let done = start.elapsed();
         let ns = done.as_secs() as usize * 1_000_000_000 + done.subsec_nanos() as usize;
-        let total = (count - T) * N;
+        let total = (count - max_threads) * N;
         println!(
             "MT-{}: done {:?} {}ns/packet {}ns/t {} tp/s",
-            T,
+            max_threads,
             done,
-            ns / (count - T),
+            ns / (count - max_threads),
             ns / total,
             (1_000_000_000 * total) / ns
         );
+    }
+    #[test]
+    fn load_and_execute_mt_benches() {
+        load_and_execute_mt_bench(1);
+        load_and_execute_mt_bench(2);
+        load_and_execute_mt_bench(3);
+        load_and_execute_mt_bench(4);
+        load_and_execute_mt_bench(8);
+        load_and_execute_mt_bench(16);
     }
 }
 
