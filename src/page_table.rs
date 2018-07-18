@@ -61,10 +61,20 @@ pub fn system_1_assign(call: &Call, pages: &mut Vec<Page>) {
 /// spend the funds from the call to the first recepient
 pub fn default_contract_128_move_funds(call: &Call, pages: &mut Vec<Page>) {
     let amount: u64 = deserialize(&call.user_data).unwrap();
-    if pages[0].balance >= amount {
-        pages[0].balance -= amount;
-        pages[1].balance += amount;
-    }
+    pages[0].balance -= amount;
+    pages[1].balance += amount;
+}
+
+#[cfg(test)]
+pub fn default_contract_254_create_new_other(call: &Call, pages: &mut Vec<Page>) {
+    let amount: u64 = deserialize(&call.user_data).unwrap();
+    pages[1].balance += amount;
+}
+
+#[cfg(test)]
+pub fn default_contract_253_create_new_mine(call: &Call, pages: &mut Vec<Page>) {
+    let amount: u64 = deserialize(&call.user_data).unwrap();
+    pages[0].balance += amount;
 }
 
 //157,173 ns/iter vs 125,791 ns/iter with using this hasher, 110,000 ns with u64 as the key
@@ -603,6 +613,14 @@ impl PageTable {
                 (_, 1) => system_1_assign(&tx, &mut call_pages),
                 // contract methods
                 (DEFAULT_CONTRACT, 128) => default_contract_128_move_funds(&tx, &mut call_pages),
+                #[cfg(test)]
+                (DEFAULT_CONTRACT, 254) => {
+                    default_contract_254_create_new_other(&tx, &mut call_pages)
+                }
+                #[cfg(test)]
+                (DEFAULT_CONTRACT, 253) => {
+                    default_contract_253_create_new_mine(&tx, &mut call_pages)
+                }
                 (contract, method) => {
                     warn!("unknown contract and method {:?} {:x}", contract, method)
                 }
@@ -871,7 +889,36 @@ mod test {
             assert_eq!(pt.get_balance(&x.keys[0]), Some(10 - (amount + x.fee)));
         }
     }
-
+    #[test]
+    fn load_and_execute_double_spends() {
+        let pt = PageTable::new();
+        let mut txs: Vec<_> = (0..2).map(|_r| Call::random_tx()).collect();
+        let start_bal = 1_000_000;
+        pt.force_allocate(&txs, true, start_bal);
+        let mut ctx = Context::default();
+        txs[0].method = 254;
+        txs[1].method = 253;
+        txs[0].fee = 3;
+        txs[1].fee = 4;
+        pt.acquire_validate_find(&txs, &mut ctx);
+        pt.allocate_keys_with_ctx(&txs, &mut ctx);
+        pt.load_pages_with_ctx(&txs, &mut ctx);
+        PageTable::execute_with_ctx(&txs, &mut ctx);
+        pt.commit_release_with_ctx(&txs, &ctx);
+        assert_eq!(pt.get_balance(&txs[0].keys[1]), Some(0));
+        assert_eq!(
+            pt.get_balance(&txs[0].keys[0]),
+            Some(start_bal - txs[0].fee)
+        );
+        assert_eq!(pt.get_balance(&txs[1].keys[1]), Some(0));
+        assert_eq!(
+            pt.get_balance(&txs[1].keys[0]),
+            Some(start_bal - txs[1].fee)
+        );
+    }
+    //TODO test assignment
+    //TODO test spends of unasigned funds
+    //TODO test realloc
     type ContextRecycler = Recycler<Context>;
     #[test]
     fn load_and_execute_pipeline_bench() {
@@ -1270,6 +1317,7 @@ mod bench {
             pt.commit_release_with_ctx(&transactions, &ctx);
         });
     }
+
     #[bench]
     fn load_and_execute_large_table(bencher: &mut Bencher) {
         let pt = PageTable::new();
