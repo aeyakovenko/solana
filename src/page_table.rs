@@ -1087,7 +1087,7 @@ mod test {
         let ns = done.as_secs() as usize * 1_000_000_000 + done.subsec_nanos() as usize;
         let total = count * N;
         println!(
-            "PIPELINE: done {:?} {}ns/packet {}ns/t {} tp/s",
+            "PAR_PIPELINE: done {:?} {}ns/packet {}ns/t {} tp/s",
             done,
             ns / (count - 1),
             ns / total,
