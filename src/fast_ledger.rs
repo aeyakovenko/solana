@@ -36,14 +36,18 @@ impl TransactionWriter {
 
 pub struct PoHWriter {
     /// number of hashes to produce for each entry
-    writer: BufWriter<File>,
-    reader: BufReader<File>,
     sender: Sender<(Hash, u64)>,
-    receiver: Receiver<(Hash, u64)>,
-    poh_entry_size: usize,
     generator: JoinHandle<()>
 }
 
+ pub struct PoHReader {
+    /// number of hashes to produce for each entry
+    reader: BufReader<File>,
+    poh_entry_size: usize,
+    capacity: usize,
+    pos: usize,
+}
+ 
 /// Points to indexes into the Record structure
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct PohEntry {
@@ -54,40 +58,48 @@ pub struct PohEntry {
     /// when record_hash is 0, this is 0 as well
     record_index: u64,
 }
+impl PoHReader {
+    pub new(file: &str, capacity: usize) -> Self {
+        let read_file = OpenOptions::new()
+                        .read(true)
+                        .open(file))?;
+        let reader = BufReader::new_with_capacity(read_file, capacity); 
+        let poh_entry_size = serialize(PohEntry::default()).unwrap().len();
+        PohReader { reader, poh_entry_size, capacity, pos: 0}
+    }
+    pub get_entry(&mut self, entry: u64) -> Result<PohEntry> {
+        let len = self.reader.get_ref().metadata().len();
+        let pos = entry * self.poh_entry_size;
+        if pos > self.pos + self.capacity {
+            self.reader.seek(SeekFrom::Start(pos));    
+            self.fill_buf()?;
+        }
+    }
+}
 
 impl PoHWriter {
-    pub new(file: &str,
-    sender: Sender<(Hash, u64)>,
-    receiver: Receiver<(Hash, u64)>
- ) -> Result<Self> {
+    pub new(file: &str, last: Hash) -> Result<Self> {
         let write_file = OpenOptions::new()
                         .create(true)
                         .append(true)
                         .open(file))?;
-        let poh_entry_size = serialize(PohEntry::default()).unwrap().len();
-        let meta = file.metadata()?;
         let writer = BufWriter::new(write_file);
-        let read_file = OpenOptions::new()
-                        .read(true)
-                        .open(file))?;
-        let reader = BufReader::new(read_file);
-        PoHWriter{writer,reader,sender, receiver, poh_entry_size }
+        let (sender, receiver) = channel();
+        let generator = spawn(|| {
+            Self::generator(start, writer, receiver);
+        })?;
+
+        PoHWriter{writer, receiver }
     }
     /// mix in the hash and record offset into the poh_file
     pub fn write(&mut self, record_hash: Hash, record_index: u64) -> Result<()> {
         self.sender.send((record_hash, record_index))?;
         Ok(())
     }
-    pub fn last_entry(&self, record_hash: Hash, record_index: u64) -> Result<()> {
-        self.sender.send((record_hash, record_index))?;
-        Ok(())
-    }
- 
     //separate thread calls this
-    pub fn generator(&self) -> Result<()> {
-        let last_entry = self.last_entry();
+    pub fn generator(writer: BufWriter, receiver: Receiver<(Hash, u64)>, mut last: Hash) -> Result<()> {
         loop {
-            let input = self.receiver.try_recv();
+            let input = receiver.try_recv();
             let record_hash;
             let record_index;
             if let Ok((in_hash, in_index)) = input {
