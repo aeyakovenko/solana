@@ -6,6 +6,7 @@ use chrono::prelude::*;
 use hash::Hash;
 use payment_plan::{Payment, PaymentPlan, Witness};
 use signature::{KeyPair, KeyPairUtil, PublicKey, Signature, SignatureUtil};
+use page_table::Call;
 
 pub const SIGNED_DATA_OFFSET: usize = 112;
 pub const SIG_OFFSET: usize = 8;
@@ -58,6 +59,7 @@ pub struct Vote {
     // TODO: add signature of the state here as well
 }
 
+const INSTRUCTION_METHOD: u8 =128;
 /// An instruction to progress the smart contract.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum Instruction {
@@ -78,40 +80,40 @@ pub enum Instruction {
 /// An instruction signed by a client with `PublicKey`.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Transaction {
-    /// A digital signature of `instruction`, `last_id` and `fee`, signed by `PublicKey`.
-    pub sig: Signature,
-
-    /// The `PublicKey` of the entity that signed the transaction data.
-    pub from: PublicKey,
-
-    /// The action the server should take.
-    pub instruction: Instruction,
-
-    /// The ID of a recent ledger entry.
-    pub last_id: Hash,
-
-    /// The number of tokens paid for processing and storage of this transaction.
-    pub fee: i64,
+    pub call: Call;
 }
-
+pub enum TransactionKeys {
+    KeyPair(KeyPair),
+    PubKey(PubKey),
+}
 impl Transaction {
-    /// Create a signed transaction from the given `Instruction`.
+    /// Compile transaction into a Call
     fn new_from_instruction(
-        from_keypair: &KeyPair,
+        keypairs: &[TransactionKeys],
         instruction: Instruction,
         last_id: Hash,
         fee: i64,
     ) -> Self {
-        let from = from_keypair.pubkey();
-        let mut tx = Transaction {
-            sig: Signature::default(),
-            instruction,
+        assert_eq!(keys.empty(), false, "expect at least 1 transaction key");
+        let pubkeys = keypairs.map(|tk| match tk {
+            KeyPair(keypair) => keypair.pubkey(),
+            PubKey(pubkey) => pubkey
+        });
+        let userdata = sereliaze(&instruction);
+        let mut call = Call::new{
+            pubkeys, 
+            0,
             last_id,
-            from,
+            0,
             fee,
+            INSTRUCTION_METHOD,
+
         };
-        tx.sign(from_keypair);
-        tx
+        keypairs.enumerate.foreach(|(i,tk)| match tk {
+            KeyPair(keypair) => call.append_signature(i, keypair),
+            _ => ()
+        });            
+        Transaction { call }
     }
 
     /// Create and sign a new Transaction. Used for unit-testing.
@@ -124,12 +126,12 @@ impl Transaction {
     ) -> Self {
         let payment = Payment {
             tokens: tokens - fee,
-            to,
+            1,
         };
         let budget = Budget::Pay(payment);
         let plan = Plan::Budget(budget);
         let instruction = Instruction::NewContract(Contract { plan, tokens });
-        Self::new_from_instruction(from_keypair, instruction, last_id, fee)
+        Self::new_from_instruction(from_keypair, to, instruction, last_id, fee)
     }
 
     /// Create and sign a new Transaction. Used for unit-testing.

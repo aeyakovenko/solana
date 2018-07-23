@@ -16,6 +16,7 @@
 ///    tag allows the contract to Write to the memory owned by the page.  Contracts can spend money
 use bincode::{deserialize, serialize};
 use rand::{thread_rng, Rng, RngCore};
+use signature::{KeyPair, KeyPairUtil, PublicKey, Signature, SignatureUtil};
 use std::collections::{BTreeMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::sync::{Mutex, RwLock};
@@ -196,11 +197,12 @@ impl Default for Page {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Call {
     /// Signatures and Keys
-    /// proofs[0] is the signature
-    /// number of proofs of ownership of `inkeys`, `owner` is proven by the signature
-    proofs: Vec<Option<Signature>>,
+    /// (signature, key index)
+    /// This vector contains a tuple of signatures, and the key index the signature is for
+    /// proofs[0] is always key[0]
+    proofs: Vec<(Signature, u8)>,
     /// number of keys to load, aka the to key
-    /// inkeys[0] is the caller's key
+    /// keys[0] is the caller's key
     keys: Vec<PublicKey>,
 
     /// PoH data
@@ -227,6 +229,28 @@ pub struct Call {
 /// TODO: The pipeline will need to pass the `destination` public keys in a side buffer to generalize
 /// this
 impl Call {
+    /// Create a new Call object
+    pub fn new(
+        keys: &[PublicKey],
+        last_id: u64,
+        last_hash: Hash,
+        version: u64,
+        fee: u64,
+        method: u8,
+        userdata: Vec<u8>,
+    ) -> Self {
+        Call {
+            proofs: vec![],
+            keys: vec![from, to],
+            last_id: last_id,
+            last_hash: last_hash,
+            contract: DEFAULT_CONTRACT,
+            fee: fee,
+            version: version,
+            method: method,
+            user_data: user_data,
+        }
+    }
     pub fn new_tx(
         from: PublicKey,
         last_id: u64,
@@ -236,18 +260,38 @@ impl Call {
         version: u64,
         to: PublicKey,
     ) -> Self {
-        Call {
-            proofs: vec![],
-            keys: vec![from, to],
-            last_id: last_id,
-            last_hash: last_hash,
-            contract: DEFAULT_CONTRACT,
-            method: 128,
-            fee: fee,
-            version: version,
-            user_data: serialize(&amount).unwrap(),
-        }
+        let user_data = serialize(&amount).unwrap();
+        Self::new(
+            &[from, to],
+            last_id,
+            last_hash,
+            version,
+            fee,
+            128,
+            user_data,
+        )
     }
+    /// Get the transaction data to sign.
+    fn get_sign_data(&self) -> Vec<u8> {
+        let mut data = serialize(&(&self.instruction)).expect("serialize Contract");
+        let last_id_data = serialize(&(&self.last_id)).expect("serialize last_id");
+        data.extend_from_slice(&last_id_data);
+
+        let fee_data = serialize(&(&self.fee)).expect("serialize last_id");
+        data.extend_from_slice(&fee_data);
+
+        data
+    }
+
+    pub fn append_signature(&mut self, index: u8, keypair: &KeyPair) {
+        let sign_data = self.get_sign_data();
+        let signature = Signature::clone_from_slice(keypair.sign(&sign_data).as_ref());
+        if Some(keypair.pubkey()) != self.keys.get(index as usize) {
+            warn!("signature is for an invalid pubkey");
+        }
+        self.proofs.append((signature, index));
+    }
+
     fn rand4() -> [u64; 4] {
         let mut r = thread_rng();
         [r.next_u64(), r.next_u64(), r.next_u64(), r.next_u64()]
