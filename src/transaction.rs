@@ -59,7 +59,7 @@ pub struct Vote {
     // TODO: add signature of the state here as well
 }
 
-const INSTRUCTION_METHOD: u8 =128;
+const INSTRUCTION_METHOD: u8 = 129;
 /// An instruction to progress the smart contract.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum Instruction {
@@ -87,7 +87,7 @@ pub enum TransactionKeys {
     PubKey(PubKey),
 }
 impl Transaction {
-    /// Compile transaction into a Call
+    /// Compile and sign transaction into a Call
     fn new_from_instruction(
         keypairs: &[TransactionKeys],
         instruction: Instruction,
@@ -109,7 +109,7 @@ impl Transaction {
             INSTRUCTION_METHOD,
 
         };
-        keypairs.enumerate.foreach(|(i,tk)| match tk {
+        keypairs.enumerate().foreach(|(i,tk)| match tk {
             KeyPair(keypair) => call.append_signature(i, keypair),
             _ => ()
         });            
@@ -126,12 +126,13 @@ impl Transaction {
     ) -> Self {
         let payment = Payment {
             tokens: tokens - fee,
-            1,
+            to,
         };
         let budget = Budget::Pay(payment);
         let plan = Plan::Budget(budget);
         let instruction = Instruction::NewContract(Contract { plan, tokens });
-        Self::new_from_instruction(from_keypair, to, instruction, last_id, fee)
+        let keys = [TransactionKeys::KeyPair(from_keypair), TransactionKeys::PubKey(to)];
+        Self::new_from_instruction(&keys, instruction, last_id, fee)
     }
 
     /// Create and sign a new Transaction. Used for unit-testing.
@@ -142,17 +143,20 @@ impl Transaction {
     /// Create and sign a new Witness Timestamp. Used for unit-testing.
     pub fn new_timestamp(from_keypair: &KeyPair, dt: DateTime<Utc>, last_id: Hash) -> Self {
         let instruction = Instruction::ApplyTimestamp(dt);
-        Self::new_from_instruction(from_keypair, instruction, last_id, 0)
+        let keys = [TransactionKeys::KeyPair(from_keypair)];
+        Self::new_from_instruction(&keys, instruction, last_id, 0)
     }
 
     /// Create and sign a new Witness Signature. Used for unit-testing.
     pub fn new_signature(from_keypair: &KeyPair, tx_sig: Signature, last_id: Hash) -> Self {
         let instruction = Instruction::ApplySignature(tx_sig);
-        Self::new_from_instruction(from_keypair, instruction, last_id, 0)
+        let keys = [TransactionKeys::KeyPair(from_keypair)];
+        Self::new_from_instruction(&keys, instruction, last_id, 0)
     }
 
     pub fn new_vote(from_keypair: &KeyPair, vote: Vote, last_id: Hash, fee: i64) -> Self {
-        Transaction::new_from_instruction(&from_keypair, Instruction::NewVote(vote), last_id, fee)
+        let keys = [TransactionKeys::KeyPair(from_keypair)];
+        Transaction::new_from_instruction(&keys, Instruction::NewVote(vote), last_id, fee)
     }
 
     /// Create and sign a postdated Transaction. Used for unit-testing.
@@ -170,35 +174,24 @@ impl Transaction {
         );
         let plan = Plan::Budget(budget);
         let instruction = Instruction::NewContract(Contract { plan, tokens });
-        Self::new_from_instruction(from_keypair, instruction, last_id, 0)
-    }
-
-    /// Get the transaction data to sign.
-    fn get_sign_data(&self) -> Vec<u8> {
-        let mut data = serialize(&(&self.instruction)).expect("serialize Contract");
-        let last_id_data = serialize(&(&self.last_id)).expect("serialize last_id");
-        data.extend_from_slice(&last_id_data);
-
-        let fee_data = serialize(&(&self.fee)).expect("serialize last_id");
-        data.extend_from_slice(&fee_data);
-
-        data
+        let keys = [TransactionKeys::KeyPair(from_keypair), TransactionKeys::PubKey(to)];
+        Self::new_from_instruction(&keys, instruction, last_id, 0)
     }
 
     /// Sign this transaction.
     pub fn sign(&mut self, keypair: &KeyPair) {
-        let sign_data = self.get_sign_data();
-        self.sig = Signature::clone_from_slice(keypair.sign(&sign_data).as_ref());
+        self.call.append_signature(0, keypair);
     }
 
     /// Verify only the transaction signature.
     pub fn verify_sig(&self) -> bool {
         warn!("transaction signature verification called");
-        self.sig.verify(&self.from, &self.get_sign_data())
+        self.call.verify_sig()
     }
 
     /// Verify only the payment plan.
     pub fn verify_plan(&self) -> bool {
+        let instruction = deserialize(self.call.data.user_data).expect("deserialize plan");
         if let Instruction::NewContract(contract) = &self.instruction {
             self.fee >= 0
                 && self.fee <= contract.tokens

@@ -194,13 +194,9 @@ impl Default for Page {
     }
 }
 /// Call definition
+/// Signed portion
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
-pub struct Call {
-    /// Signatures and Keys
-    /// (signature, key index)
-    /// This vector contains a tuple of signatures, and the key index the signature is for
-    /// proofs[0] is always key[0]
-    proofs: Vec<(Signature, u8)>,
+struct CallData {
     /// number of keys to load, aka the to key
     /// keys[0] is the caller's key
     keys: Vec<PublicKey>,
@@ -209,20 +205,30 @@ pub struct Call {
     /// last id PoH observed by the sender
     last_id: u64,
     /// last PoH hash observed by the sender
-    last_hash: Hash,
+    pub last_hash: Hash,
 
     /// Program
     /// the address of the program we want to call
-    contract: PublicKey,
+    pub contract: PublicKey,
     /// OS scheduling fee
-    fee: u64,
+    pub fee: u64,
     /// struct version to prevent duplicate spends
     /// Calls with a version <= Page.version are rejected
     pub version: u64,
     /// method to call in the contract
-    method: u8,
+    pub method: u8,
     /// usedata in bytes
-    user_data: Vec<u8>,
+    pub user_data: Vec<u8>,
+}
+/// All the proofs
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
+pub struct Call {
+    /// Signatures and Keys
+    /// (signature, key index)
+    /// This vector contains a tuple of signatures, and the key index the signature is for
+    /// proofs[0] is always key[0]
+    proofs: Vec<(Signature, u8)>,
+    pub data: CallData,
 }
 
 /// simple transaction over a Call
@@ -234,21 +240,24 @@ impl Call {
         keys: &[PublicKey],
         last_id: u64,
         last_hash: Hash,
+        contract: &PublicKey,
         version: u64,
         fee: u64,
         method: u8,
-        userdata: Vec<u8>,
+        user_data: Vec<u8>,
     ) -> Self {
         Call {
             proofs: vec![],
-            keys: vec![from, to],
-            last_id: last_id,
-            last_hash: last_hash,
-            contract: DEFAULT_CONTRACT,
-            fee: fee,
-            version: version,
-            method: method,
-            user_data: user_data,
+            data: CallData {
+                keys: vec![from, to],
+                last_id: last_id,
+                last_hash: last_hash,
+                contract: contract,
+                fee: fee,
+                version: version,
+                method: method,
+                user_data: user_data,
+            },
         }
     }
     pub fn new_tx(
@@ -265,31 +274,34 @@ impl Call {
             &[from, to],
             last_id,
             last_hash,
+            &DEFAULT_CONTRACT,
             version,
             fee,
             128,
             user_data,
         )
     }
+
     /// Get the transaction data to sign.
     fn get_sign_data(&self) -> Vec<u8> {
-        let mut data = serialize(&(&self.instruction)).expect("serialize Contract");
-        let last_id_data = serialize(&(&self.last_id)).expect("serialize last_id");
-        data.extend_from_slice(&last_id_data);
-
-        let fee_data = serialize(&(&self.fee)).expect("serialize last_id");
-        data.extend_from_slice(&fee_data);
-
-        data
+        serialize(&self.data).expect("serialize CallData");
     }
 
     pub fn append_signature(&mut self, index: u8, keypair: &KeyPair) {
         let sign_data = self.get_sign_data();
         let signature = Signature::clone_from_slice(keypair.sign(&sign_data).as_ref());
-        if Some(keypair.pubkey()) != self.keys.get(index as usize) {
+        if Some(keypair.pubkey()) != self.data.keys.get(index as usize) {
             warn!("signature is for an invalid pubkey");
         }
         self.proofs.append((signature, index));
+    }
+    /// Verify only the transaction signature.
+    pub fn verify_sig(&self) -> bool {
+        warn!("transaction signature verification called");
+        let sig_data = self.get_sign_data();
+        self.proofs
+            .map(|(index, sig)| sig.verify(&self.data.keys[index], &sign_data))
+            .fold(|x, y| x && y, true)
     }
 
     fn rand4() -> [u64; 4] {
