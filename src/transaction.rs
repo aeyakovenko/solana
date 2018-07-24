@@ -102,9 +102,9 @@ impl Transaction {
         let userdata = sereliaze(&instruction);
         let mut call = Call::new{
             pubkeys, 
-            0,
+            0, //TODO(anatoly): PoH count
             last_id,
-            0,
+            0, //TODO(anatoly): expected version of the page in page_table
             fee,
             INSTRUCTION_METHOD,
 
