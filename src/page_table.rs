@@ -199,6 +199,7 @@ impl Default for Page {
 /// Signed portion
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 struct CallData {
+    // TODO(anatoly): allow for read only pages
     /// number of keys to load, aka the to key
     /// keys[0] is the caller's key
     keys: Vec<PublicKey>,
@@ -357,6 +358,8 @@ impl AllocatedPages {
 pub struct PageTable {
     /// a map from page public keys, to index into the page_table
     allocated_pages: RwLock<AllocatedPages>,
+    // TODO(anatoly): allow for read only pages
+    // read only pages would need a ref count per page, so a HashMap is probably a better structure
     /// locked pages that are currently processed
     mem_locks: Mutex<HashSet<PublicKey, FastHasher>>,
     /// entries of Pages

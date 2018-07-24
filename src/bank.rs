@@ -69,38 +69,15 @@ pub type Result<T> = result::Result<T, BankError>;
 
 /// The state of all accounts and contracts after processing its entries.
 pub struct Bank {
-    /// A map of account public keys to the balance in that account.
-    balances: RwLock<HashMap<PublicKey, i64>>,
-
-    /// A map of smart contract transaction signatures to what remains of its payment
-    /// plan. Each transaction that targets the plan should cause it to be reduced.
-    /// Once it cannot be reduced, final payments are made and it is discarded.
-    pending: RwLock<HashMap<Signature, Plan>>,
-
-    /// A FIFO queue of `last_id` items, where each item is a set of signatures
-    /// that have been processed using that `last_id`. Rejected `last_id`
-    /// values are so old that the `last_id` has been pulled out of the queue.
+    /// The page table
+    page_table: Arc<PageTable>,
+    //TODO(anatoly): this functionality shoudl be handled by the ledger
+    //Ledger context in a call is
+    //(PoH Count, PoH Hash)
+    //Ledger should implement a O(1) `lookup(PoH Count) -> PoH Hash`
+    //which shoudl filter invalid Calls
     last_ids: RwLock<VecDeque<Hash>>,
-
-    // Mapping of hashes to signature sets. The bank uses this data to
-    /// reject transactions with signatures its seen before
-    last_ids_sigs: RwLock<HashMap<Hash, HashSet<Signature>>>,
-
-    /// The number of transactions the bank has processed without error since the
-    /// start of the ledger.
-    transaction_count: AtomicUsize,
-}
-
-impl Default for Bank {
-    fn default() -> Self {
-        Bank {
-            balances: RwLock::new(HashMap::new()),
-            pending: RwLock::new(HashMap::new()),
-            last_ids: RwLock::new(VecDeque::new()),
-            last_ids_sigs: RwLock::new(HashMap::new()),
-            transaction_count: AtomicUsize::new(0),
-        }
-    }
+    last_ids_sets: RwLock<HashSet<Hash>>,
 }
 
 impl Bank {
@@ -122,11 +99,6 @@ impl Bank {
         bank
     }
 
-    /// Commit funds to the `payment.to` party.
-    fn apply_payment(&self, payment: &Payment, balances: &mut HashMap<PublicKey, i64>) {
-        *balances.entry(payment.to).or_insert(0) += payment.tokens;
-    }
-
     /// Return the last entry ID registered.
     pub fn last_id(&self) -> Hash {
         let last_ids = self.last_ids.read().expect("'last_ids' read lock");
@@ -137,49 +109,6 @@ impl Bank {
         *last_item
     }
 
-    /// Store the given signature. The bank will reject any transaction with the same signature.
-    fn reserve_signature(signatures: &mut HashSet<Signature>, sig: &Signature) -> Result<()> {
-        if let Some(sig) = signatures.get(sig) {
-            return Err(BankError::DuplicateSignature(*sig));
-        }
-        signatures.insert(*sig);
-        Ok(())
-    }
-
-    /// Forget the given `signature` because its transaction was rejected.
-    fn forget_signature(signatures: &mut HashSet<Signature>, signature: &Signature) {
-        signatures.remove(signature);
-    }
-
-    /// Forget the given `signature` with `last_id` because the transaction was rejected.
-    fn forget_signature_with_last_id(&self, signature: &Signature, last_id: &Hash) {
-        if let Some(entry) = self.last_ids_sigs
-            .write()
-            .expect("'last_ids' read lock in forget_signature_with_last_id")
-            .get_mut(last_id)
-        {
-            Self::forget_signature(entry, signature);
-        }
-    }
-
-    /// Forget all signatures. Useful for benchmarking.
-    pub fn clear_signatures(&self) {
-        for (_, sigs) in self.last_ids_sigs.write().unwrap().iter_mut() {
-            sigs.clear();
-        }
-    }
-
-    fn reserve_signature_with_last_id(&self, signature: &Signature, last_id: &Hash) -> Result<()> {
-        if let Some(entry) = self.last_ids_sigs
-            .write()
-            .expect("'last_ids' read lock in reserve_signature_with_last_id")
-            .get_mut(last_id)
-        {
-            return Self::reserve_signature(entry, signature);
-        }
-        Err(BankError::LastIdNotFound(*last_id))
-    }
-
     /// Tell the bank which Entry IDs exist on the ledger. This function
     /// assumes subsequent calls correspond to later entries, and will boot
     /// the oldest ones once its internal cache is full. Once boot, the
@@ -188,78 +117,60 @@ impl Bank {
         let mut last_ids = self.last_ids
             .write()
             .expect("'last_ids' write lock in register_entry_id");
-        let mut last_ids_sigs = self.last_ids_sigs
+        let mut last_ids_sets = self.last_ids_sets
             .write()
-            .expect("last_ids_sigs write lock");
+            .expect("last_ids_sets write lock");
         if last_ids.len() >= MAX_ENTRY_IDS {
             let id = last_ids.pop_front().unwrap();
-            last_ids_sigs.remove(&id);
+            last_ids_sets.remove(&id);
         }
-        last_ids_sigs.insert(*last_id, HashSet::new());
+        last_ids_set.insert(*last_id);
         last_ids.push_back(*last_id);
     }
 
     /// Deduct tokens from the 'from' address the account has sufficient
     /// funds and isn't a duplicate.
     fn apply_debits(tx: &Call, instruction: &Instruction, bals: &mut [Page]) -> Result<()> {
-        let mut purge = false;
-        {
-            let option = bals.get_mut(&tx.from);
-            if option.is_none() {
-                if let Instruction::NewVote(_) = &tx.instruction {
-                    inc_new_counter!("bank-appy_debits-vote_account_not_found", 1);
-                } else {
-                    inc_new_counter!("bank-appy_debits-generic_account_not_found", 1);
-                }
-                return Err(BankError::AccountNotFound(tx.from));
+        let bal = &bals[0].balance;
+        if let Instruction::NewContract(contract) = &instruction {
+            if contract.tokens < 0 {
+                return Err(BankError::NegativeTokens);
             }
-            let bal = &bals[0].balance;
-
-            self.reserve_signature_with_last_id(&tx.sig, &tx.last_id)?;
-
-            if let Instruction::NewContract(contract) = &tx.instruction {
-                if contract.tokens < 0 {
-                    return Err(BankError::NegativeTokens);
-                }
-
-                if *bal < contract.tokens {
-                    self.forget_signature_with_last_id(&tx.sig, &tx.last_id);
-                    return Err(BankError::InsufficientFunds(tx.from));
-                } else if *bal == contract.tokens {
-                    purge = true;
-                } else {
-                    *bal -= contract.tokens;
-                }
-            };
+            if *bal < call.tokens {
+                return Err(BankError::InsufficientFunds(tx.from));
+            } else {
+                *bal -= contract.tokens;
+            }
         }
-
-        if purge {
-            bals.remove(&tx.from);
-        }
-
         Ok(())
     }
 
+    /// Deposit Payment to the Page balance
+    fn apply_payment(payment: &Payment, balances: &mut Page) {
+        page.balance += payment.tokens;
+    }
+
     /// Apply only a transaction's credits.
-    /// Note: It is safe to apply credits from multiple transactions in parallel.
     fn apply_credits(tx: &Call, instruction: &Instruction, balances: &mut [Page]) {
-        match &tx.instruction {
+        match &instruction {
             Instruction::NewContract(contract) => {
+                //TODO(greg): double check, is the caller the contract context, or is the contract
+                //in a separate address?
                 let plan = contract.plan.clone();
                 if let Some(payment) = plan.final_payment() {
-                    self.apply_payment(&payment, balances);
+                    self.apply_payment(&payment, &mut balances[0]);
                 } else {
-                    let mut pending = self.pending
-                        .write()
-                        .expect("'pending' write lock in apply_credits");
+                    let mut pending: HashMap<Signature, Plan> =
+                        deserialize(balances[0].user_data).unwrap();
                     pending.insert(tx.sig, plan);
+                    balances[0].user_data = serealize(&pending).expect("serealize pending hashmap");
                 }
             }
             Instruction::ApplyTimestamp(dt) => {
-                let _ = self.apply_timestamp(tx.from, *dt);
+                let _ = self.apply_timestamp(&mut balances[0], *dt);
             }
             Instruction::ApplySignature(tx_sig) => {
-                let _ = self.apply_signature(tx.from, *tx_sig);
+                let _ = self.apply_signature(&mut balances[0], *tx_sig);
             }
             Instruction::NewVote(_vote) => {
                 info!("GOT VOTE!");
@@ -530,10 +441,10 @@ impl Bank {
     }
 
     pub fn has_signature(&self, signature: &Signature) -> bool {
-        let last_ids_sigs = self.last_ids_sigs
+        let last_ids_sets = self.last_ids_sets
             .read()
-            .expect("'last_ids_sigs' read lock");
-        for (_hash, signatures) in last_ids_sigs.iter() {
+            .expect("'last_ids_sets' read lock");
+        for (_hash, signatures) in last_ids_sets.iter() {
             if signatures.contains(signature) {
                 return true;
             }
