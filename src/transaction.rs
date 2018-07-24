@@ -59,7 +59,6 @@ pub struct Vote {
     // TODO: add signature of the state here as well
 }
 
-const INSTRUCTION_METHOD: u8 = 129;
 /// An instruction to progress the smart contract.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub enum Instruction {

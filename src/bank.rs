@@ -12,6 +12,7 @@ use hash::Hash;
 use itertools::Itertools;
 use ledger::Block;
 use mint::Mint;
+use page_table::{Call, Page};
 use payment_plan::{Payment, PaymentPlan, Witness};
 use signature::{KeyPair, PublicKey, Signature};
 use std::collections::hash_map::Entry::Occupied;
@@ -33,6 +34,8 @@ use transaction::{Instruction, Plan, Transaction};
 pub const MAX_ENTRY_IDS: usize = 1024 * 16;
 
 pub const VERIFY_BLOCK_SIZE: usize = 16;
+
+const BANK_PROCESS_TRANSACTION_METHOD: u8 = 129;
 
 /// Reasons a transaction might be rejected.
 #[derive(Debug, PartialEq, Eq)]
@@ -198,7 +201,7 @@ impl Bank {
 
     /// Deduct tokens from the 'from' address the account has sufficient
     /// funds and isn't a duplicate.
-    fn apply_debits(&self, tx: &Transaction, bals: &mut HashMap<PublicKey, i64>) -> Result<()> {
+    fn apply_debits(tx: &Call, instruction: &Instruction, bals: &mut [Page]) -> Result<()> {
         let mut purge = false;
         {
             let option = bals.get_mut(&tx.from);
@@ -210,7 +213,7 @@ impl Bank {
                 }
                 return Err(BankError::AccountNotFound(tx.from));
             }
-            let bal = option.unwrap();
+            let bal = &bals[0].balance;
 
             self.reserve_signature_with_last_id(&tx.sig, &tx.last_id)?;
 
@@ -239,7 +242,7 @@ impl Bank {
 
     /// Apply only a transaction's credits.
     /// Note: It is safe to apply credits from multiple transactions in parallel.
-    fn apply_credits(&self, tx: &Transaction, balances: &mut HashMap<PublicKey, i64>) {
+    fn apply_credits(tx: &Call, instruction: &Instruction, balances: &mut [Page]) {
         match &tx.instruction {
             Instruction::NewContract(contract) => {
                 let plan = contract.plan.clone();
@@ -267,11 +270,10 @@ impl Bank {
 
     /// Process a Transaction. If it contains a payment plan that requires a witness
     /// to progress, the payment plan will be stored in the bank.
-    pub fn process_transaction(&self, tx: &Transaction) -> Result<()> {
-        let bals = &mut self.balances.write().unwrap();
-        self.apply_debits(tx, bals)?;
-        self.apply_credits(tx, bals);
-        self.transaction_count.fetch_add(1, Ordering::Relaxed);
+    pub fn process_transaction(tx: &Call, pages: &mut [Page]) -> Result<()> {
+        let instruction = deserialize(tx.user_data).expect("instruction deserialize");
+        self.apply_debits(tx, &instruction, pages)?;
+        self.apply_credits(tx, &instruction, pages);
         Ok(())
     }
 

@@ -36,7 +36,7 @@ const DEFAULT_CONTRACT: [u64; 4] = [0u64; 4];
 /// method 0
 /// reallocate
 /// spend the funds from the call to the first recepient
-pub fn system_0_realloc(call: &Call, pages: &mut Vec<Page>) {
+pub fn system_0_realloc(call: &Call, pages: &mut [Page]) {
     if call.contract == DEFAULT_CONTRACT {
         let size: u64 = deserialize(&call.user_data).unwrap();
         pages[0].memory.resize(size as usize, 0u8);
@@ -45,7 +45,7 @@ pub fn system_0_realloc(call: &Call, pages: &mut Vec<Page>) {
 /// method 1
 /// assign
 /// assign the page to a contract
-pub fn system_1_assign(call: &Call, pages: &mut Vec<Page>) {
+pub fn system_1_assign(call: &Call, pages: &mut [Page]) {
     let contract = deserialize(&call.user_data).unwrap();
     if call.contract == DEFAULT_CONTRACT {
         pages[0].contract = contract;
@@ -60,20 +60,20 @@ pub fn system_1_assign(call: &Call, pages: &mut Vec<Page>) {
 /// method 128
 /// move_funds
 /// spend the funds from the call to the first recepient
-pub fn default_contract_128_move_funds(call: &Call, pages: &mut Vec<Page>) {
+pub fn default_contract_128_move_funds(call: &Call, pages: &mut [Page]) {
     let amount: u64 = deserialize(&call.user_data).unwrap();
     pages[0].balance -= amount;
     pages[1].balance += amount;
 }
 
 #[cfg(test)]
-pub fn default_contract_254_create_new_other(call: &Call, pages: &mut Vec<Page>) {
+pub fn default_contract_254_create_new_other(call: &Call, pages: &mut [Page]) {
     let amount: u64 = deserialize(&call.user_data).unwrap();
     pages[1].balance += amount;
 }
 
 #[cfg(test)]
-pub fn default_contract_253_create_new_mine(call: &Call, pages: &mut Vec<Page>) {
+pub fn default_contract_253_create_new_mine(call: &Call, pages: &mut [Page]) {
     let amount: u64 = deserialize(&call.user_data).unwrap();
     pages[0].balance += amount;
 }
@@ -160,9 +160,11 @@ pub struct Page {
     /// contract can write to the data that is pointed to by `pointer`
     contract: PublicKey,
     /// balance that belongs to owner
-    balance: u64,
+    balance: i64,
     /// version of the structure, public for testing
-    version: u64,
+    /// Only a transactin that matches the current version in the page table is accepted
+    /// Once its processed, the version number is incremented.  This is wrap around safe.
+    pub version: u32,
     /// hash of the page data
     memhash: Hash,
     /// The following could be in a separate structure
@@ -464,7 +466,7 @@ impl PageTable {
                     // this check prevents retransmitted transactions from being processed
                     // the client must increase the tx.versoin to be greater than the
                     // page_table[keys[0]].version
-                    if page.version >= tx.version {
+                    if page.version != tx.version {
                         continue;
                     }
                     // pages must belong to the contract
@@ -692,6 +694,10 @@ impl PageTable {
             if !Self::validate_balances(&tx, &loaded_pages, &call_pages) {
                 return;
             }
+            //update the version
+            //TODO(anatoly): wrap around test, the OS should correclty handle this value as it
+            //wrapps around, since only 1 call can access this page at a time.
+            call_pages[0].version += 1;
             // write pages back to memory
             for (pre, post) in loaded_pages.iter_mut().zip(call_pages.into_iter()) {
                 *pre = post;
@@ -710,6 +716,7 @@ impl PageTable {
         loaded_page_table: &Vec<Vec<Page>>,
     ) {
         let mut page_table = self.page_table.write().unwrap();
+        let mut count = 0;
         for (i, commit) in commits.into_iter().enumerate() {
             if !*commit {
                 continue;
@@ -718,7 +725,9 @@ impl PageTable {
                 let ix = oix.expect("checked pages should be loadable");
                 page_table[ix] = loaded_page_table[i][j].clone();
             }
+            count += 1;
         }
+        self.transaction_count.fetch_add(count, Ordering::Relaxed);
     }
     pub fn commit_release_with_ctx(&self, packet: &Vec<Call>, ctx: &Context) {
         self.commit(packet, &ctx.commit, &ctx.pages, &ctx.loaded_page_table);
