@@ -22,8 +22,8 @@ pub struct Payment {
     /// Amount to be paid.
     pub tokens: i64,
 
-    /// The index in the page_table::Call.keys vector of the `PublicKey` that `tokens` should be paid to.
-    pub to: PublicKey,
+    /// The `PublicKey` that `tokens` should be paid to.
+    pub to: PublicKey, //TODO(anatoly): this should be an index into the Call::data.keys field
 }
 
 /// Interface to smart contracts.
