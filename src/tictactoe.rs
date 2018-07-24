@@ -1,64 +1,9 @@
 /// Tic-Tac-Toe smart contract
 /// Players can create a game, play it, contract can maintaing their ranking
 use bincode::{deserialize, serialize_into};
+use page_table::{Call, Page};
 use signature::PublicKey;
 use std::io::Cursor;
-
-/// smart contract interface
-/// * `instance` - read only module instance data, currently empty, but shoudl
-///                be filled with data supplied by the contract instance
-///                creator
-/// * `method` - just like a system call, this is the index of the method
-///              that is called in this contract
-/// * `mems` - buffers passed in to be modified by the contract.  The following
-///            indexies indicate different kinds of buffers:
-///     `CALLER` - context for the creator of the transaction that made the `call`
-///     `CALL_DATA` - copy of userdata passed into the transaction
-///     `MEM_START` - buffers that are paged in for this call
-/// TBD: We can pass a Vec<Call> to the driver as well, which the driver can
-/// fill out as asynchronous calls to be scheduled after this call.  Ideally
-/// this should be something coalescable.
-pub fn call(
-    // module instance data, currently empty, but should be filled with
-    // data supplied by the contract instance creator
-    instance: &Instance,
-    // method
-    method: i64,
-    // memory for the call
-    mems: &mut Vec<CallData>,
-) {
-    match method {
-        0 => new_player(instance, mems),
-        1 => new_game(instance, mems),
-        2 => take_turn(instance, mems),
-        _ => (),
-    }
-}
-
-/// raw memory
-pub type Memory = Vec<u8>;
-
-/// caller is always the first mem index
-const CALLER: usize = 0;
-/// call_data is transaction data, public_key == [0..], bit flags are ignored
-const CALL_DATA: usize = 1;
-/// mem_start is the start of the memory buffers paged into this call
-const MEM_START: usize = 2;
-
-pub struct CallData {
-    /// public key that is the address of the memory
-    public_key: PublicKey,
-    /// memory that is identified by the public key
-    mem: Memory,
-    /// `true` if the incomming transaction prooved ownershp of public_key
-    proof_of_ownership: bool,
-    /// `true` if the memory was just created
-    just_allocated: bool,
-}
-
-pub struct Instance {
-    //read only config data
-}
 
 /// game specific code
 #[derive(Serialize, Deserialize, PartialEq, Clone)]
@@ -87,7 +32,7 @@ struct Game {
     over: bool,
 }
 
-fn new_player(_instance: &Instance, mems: &mut Vec<CallData>) {
+fn new_player(call: &Call, pages: &mut Vec<Page>) {
     let caller_data = &mut mems[CALLER];
     assert!(caller_data.proof_of_ownership);
     assert!(caller_data.just_allocated);
@@ -101,7 +46,7 @@ fn new_player(_instance: &Instance, mems: &mut Vec<CallData>) {
     serialize_into(&mut out, &p).expect("failed to serialize output");
 }
 
-fn new_game(_instance: &Instance, mems: &mut Vec<CallData>) {
+fn new_game(call: &Call, pages: &mut Vec<Page>) {
     let (player_one_data, player_two_data, game_data) = unsafe {
         //borrow checker can't handle two refs to indexies in the same function
         let a = &mut *(mems.get_unchecked_mut(CALLER) as *mut CallData);
@@ -139,7 +84,7 @@ fn new_game(_instance: &Instance, mems: &mut Vec<CallData>) {
     serialize_into(&mut out, &g).expect("failed to serialize output");
 }
 
-fn take_turn(_instance: &Instance, mems: &mut Vec<CallData>) {
+fn take_turn(call: &Call, pages: &mut Vec<Page>) {
     let (player_data, game_data) = unsafe {
         //borrow checker can't handle two refs to indexies in the same function
         let a = &mut *(mems.get_unchecked_mut(CALLER) as *mut CallData);
