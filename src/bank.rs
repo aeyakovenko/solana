@@ -158,7 +158,7 @@ impl Bank {
                 //in a separate address?
                 let plan = contract.plan.clone();
                 if let Some(payment) = plan.final_payment() {
-                    self.apply_payment(&payment, &mut balances[0]);
+                    Self::apply_payment(&payment, &mut balances[0]);
                 } else {
                     let mut pending: HashMap<Signature, Plan> =
                         deserialize(balances[0].user_data).unwrap();
@@ -167,10 +167,18 @@ impl Bank {
                 }
             }
             Instruction::ApplyTimestamp(dt) => {
-                let _ = self.apply_timestamp(&mut balances[0], *dt);
+                let mut pending: HashMap<Signature, Plan> =
+                    deserialize(balances[0].user_data).unwrap();
+                pending.insert(tx.sig, plan);
+                let _ = Self::apply_timestamp(&mut balances[0], &mut pending, *dt);
+                balances[0].user_data = serealize(&pending).expect("serealize pending hashmap");
             }
             Instruction::ApplySignature(tx_sig) => {
-                let _ = self.apply_signature(&mut balances[0], *tx_sig);
+                let mut pending: HashMap<Signature, Plan> =
+                    deserialize(balances[0].user_data).unwrap();
+                let _ = Self::apply_signature(&mut balances[0], &mut pending, *tx_sig);
+                pending.insert(tx.sig, plan);
+                balances[0].user_data = serealize(&pending).expect("serealize pending hashmap");
             }
             Instruction::NewVote(_vote) => {
                 info!("GOT VOTE!");
@@ -181,7 +189,10 @@ impl Bank {
 
     /// Process a Transaction. If it contains a payment plan that requires a witness
     /// to progress, the payment plan will be stored in the bank.
-    pub fn process_transaction(tx: &Call, pages: &mut [Page]) -> Result<()> {
+    pub fn default_contract_method_129_process_transaction(
+        tx: &Call,
+        pages: &mut [Page],
+    ) -> Result<()> {
         let instruction = deserialize(tx.user_data).expect("instruction deserialize");
         self.apply_debits(tx, &instruction, pages)?;
         self.apply_credits(tx, &instruction, pages);
@@ -354,40 +365,39 @@ impl Bank {
 
         Ok((entry_count, tail))
     }
-
     /// Process a Witness Signature. Any payment plans waiting on this signature
     /// will progress one step.
-    fn apply_signature(&self, from: PublicKey, tx_sig: Signature) -> Result<()> {
-        if let Occupied(mut e) = self.pending
-            .write()
-            .expect("write() in apply_signature")
-            .entry(tx_sig)
-        {
-            e.get_mut().apply_witness(&Witness::Signature, &from);
+    fn apply_signature(
+        page: &mut Page,
+        pending: &mut HashMap<Signature, Plan>,
+        tx_sig: Signature,
+    ) -> Result<()> {
+        if let Occupied(mut e) = pending.entry(tx_sig) {
+            e.get_mut().apply_witness(&Witness::Signature, &page.owner);
             if let Some(payment) = e.get().final_payment() {
-                self.apply_payment(&payment, &mut self.balances.write().unwrap());
+                Self::apply_payment(&payment, page);
                 e.remove_entry();
             }
         };
-
         Ok(())
     }
 
     /// Process a Witness Timestamp. Any payment plans waiting on this timestamp
     /// will progress one step.
-    fn apply_timestamp(&self, from: PublicKey, dt: DateTime<Utc>) -> Result<()> {
+    fn apply_timestamp(
+        page: &mut Page,
+        pending: &mut HashMap<Signature, Plan>,
+        dt: DateTime<Utc>,
+    ) -> Result<()> {
         // Check to see if any timelocked transactions can be completed.
         let mut completed = vec![];
 
         // Hold 'pending' write lock until the end of this function. Otherwise another thread can
         // double-spend if it enters before the modified plan is removed from 'pending'.
-        let mut pending = self.pending
-            .write()
-            .expect("'pending' write lock in apply_timestamp");
         for (key, plan) in pending.iter_mut() {
             plan.apply_witness(&Witness::Timestamp(dt), &from);
             if let Some(payment) = plan.final_payment() {
-                self.apply_payment(&payment, &mut self.balances.write().unwrap());
+                self.apply_payment(&payment, page);
                 completed.push(key.clone());
             }
         }

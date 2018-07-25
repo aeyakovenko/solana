@@ -4,9 +4,9 @@ use bincode::serialize;
 use budget::{Budget, Condition};
 use chrono::prelude::*;
 use hash::Hash;
+use page_table::Call;
 use payment_plan::{Payment, PaymentPlan, Witness};
 use signature::{KeyPair, KeyPairUtil, PublicKey, Signature, SignatureUtil};
-use page_table::Call;
 
 pub const SIGNED_DATA_OFFSET: usize = 112;
 pub const SIG_OFFSET: usize = 8;
@@ -79,7 +79,7 @@ pub enum Instruction {
 /// An instruction signed by a client with `PublicKey`.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct Transaction {
-    pub call: Call;
+    pub call: Call,
 }
 pub enum TransactionKeys {
     KeyPair(KeyPair),
@@ -96,22 +96,21 @@ impl Transaction {
         assert_eq!(keys.empty(), false, "expect at least 1 transaction key");
         let pubkeys = keypairs.map(|tk| match tk {
             KeyPair(keypair) => keypair.pubkey(),
-            PubKey(pubkey) => pubkey
+            PubKey(pubkey) => pubkey,
         });
         let userdata = sereliaze(&instruction);
-        let mut call = Call::new{
-            pubkeys, 
+        let mut call = Call::new(
+            pubkeys,
             0, //TODO(anatoly): PoH count
             last_id,
             0, //TODO(anatoly): expected version of the page in page_table
             fee,
             INSTRUCTION_METHOD,
-
-        };
-        keypairs.enumerate().foreach(|(i,tk)| match tk {
+        );
+        keypairs.enumerate().foreach(|(i, tk)| match tk {
             KeyPair(keypair) => call.append_signature(i, keypair),
-            _ => ()
-        });            
+            _ => (),
+        });
         Transaction { call }
     }
 
@@ -130,7 +129,10 @@ impl Transaction {
         let budget = Budget::Pay(payment);
         let plan = Plan::Budget(budget);
         let instruction = Instruction::NewContract(Contract { plan, tokens });
-        let keys = [TransactionKeys::KeyPair(from_keypair), TransactionKeys::PubKey(to)];
+        let keys = [
+            TransactionKeys::KeyPair(from_keypair),
+            TransactionKeys::PubKey(to),
+        ];
         Self::new_from_instruction(&keys, instruction, last_id, fee)
     }
 
@@ -173,7 +175,10 @@ impl Transaction {
         );
         let plan = Plan::Budget(budget);
         let instruction = Instruction::NewContract(Contract { plan, tokens });
-        let keys = [TransactionKeys::KeyPair(from_keypair), TransactionKeys::PubKey(to)];
+        let keys = [
+            TransactionKeys::KeyPair(from_keypair),
+            TransactionKeys::PubKey(to),
+        ];
         Self::new_from_instruction(&keys, instruction, last_id, 0)
     }
 
