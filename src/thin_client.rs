@@ -150,6 +150,7 @@ impl ThinClient {
             }
             self.process_response(&resp);
         }
+        trace!("get_balance {:?}", self.balances.get(pubkey));
         self.balances
             .get(pubkey)
             .map(|a| a.tokens)
