@@ -95,7 +95,7 @@ pub struct Transaction {
     /// Optional user data to be stored in the account
     /// TODO: This will be a required field for all contract operations including a simple spend.
     /// `instruction` will be serialized into `userdata` once Budget is its own generic contract.
-    pub userdata: Option<Vec<u8>>,
+    pub userdata: Vec<u8>,
 }
 
 impl Transaction {
@@ -105,7 +105,7 @@ impl Transaction {
         instruction: Instruction,
         last_id: Hash,
         fee: i64,
-        userdata: Option<Vec<u8>>,
+        userdata: Vec<u8>,
     ) -> Self {
         let from = from_keypair.pubkey();
         let mut tx = Transaction {
@@ -126,7 +126,7 @@ impl Transaction {
         last_id: Hash,
         fee: i64,
     ) -> Self {
-        Self::new_with_userdata_and_instruction(from_keypair, instruction, last_id, fee, None)
+        Self::new_with_userdata_and_instruction(from_keypair, instruction, last_id, fee, vec![])
     }
 
     /// Create and sign a new Transaction. Used for unit-testing.
@@ -292,7 +292,7 @@ mod tests {
             last_id: Default::default(),
             signature: Default::default(),
             fee: 0,
-            userdata: None,
+            userdata: vec![],
         };
         let buf = serialize(&claim0).unwrap();
         let claim1: Transaction = deserialize(&buf).unwrap();
@@ -343,7 +343,7 @@ mod tests {
     #[test]
     fn test_userdata_layout() {
         let mut tx0 = test_tx();
-        tx0.userdata = Some(vec![1, 2, 3]);
+        tx0.userdata = vec![1, 2, 3];
         let sign_data0a = tx0.get_sign_data();
         let tx_bytes = serialize(&tx0).unwrap();
         assert!(tx_bytes.len() < 256);
@@ -355,9 +355,9 @@ mod tests {
         assert_eq!(memfind(&tx_bytes, &tx0.from.as_ref()), Some(PUB_KEY_OFFSET));
         let tx1 = deserialize(&tx_bytes).unwrap();
         assert_eq!(tx0, tx1);
-        assert_eq!(tx1.userdata, Some(vec![1, 2, 3]));
+        assert_eq!(tx1.userdata, vec![1, 2, 3]);
 
-        tx0.userdata = Some(vec![1, 2, 4]);
+        tx0.userdata = vec![1, 2, 4];
         let sign_data0b = tx0.get_sign_data();
         assert_ne!(sign_data0a, sign_data0b);
     }

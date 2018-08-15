@@ -324,15 +324,13 @@ impl Bank {
     fn save_data(&self, tx: &Transaction, accounts: &mut HashMap<Pubkey, Account>) {
         //TODO This is a temporary implementation until the full rules on memory management for
         //smart contracts are implemented. See github issue #953
-        if let Some(ref userdata) = tx.userdata {
-            let mut data = &mut accounts
-                .entry(tx.from)
-                .or_insert_with(Account::default)
-                .userdata;
-            if data.len() != userdata.len() {
-                data.resize(userdata.len(), 0);
+        if !tx.userdata.is_empty() {
+            if let Some(ref mut account) = accounts.get_mut(&tx.from) {
+                if account.userdata.len() != tx.userdata.len() {
+                    account.userdata.resize(tx.userdata.len(), 0);
+                }
+                account.userdata.copy_from_slice(&tx.userdata);
             }
-            data.copy_from_slice(&userdata);
         }
     }
 
@@ -724,7 +722,7 @@ mod tests {
         let pubkey = mint.keypair().pubkey();
 
         let mut tx = Transaction::new(&mint.keypair(), pubkey, 0, bank.last_id());
-        tx.userdata = Some(vec![1, 2, 3]);
+        tx.userdata = vec![1, 2, 3];
         let rv = bank.process_transaction(&tx);
         assert!(rv.is_ok());
         let account = bank.get_account(&pubkey);
