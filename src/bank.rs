@@ -247,10 +247,14 @@ impl Bank {
 
     /// Deduct tokens from the 'from' address the account has sufficient
     /// funds and isn't a duplicate.
-    fn apply_debits(&self, tx: &Transaction, bals: &mut HashMap<Pubkey, Account>) -> Result<()> {
+    fn apply_debits(
+        &self,
+        tx: &Transaction,
+        accounts: &mut HashMap<Pubkey, Account>,
+    ) -> Result<()> {
         let mut purge = false;
         {
-            let option = bals.get_mut(&tx.from);
+            let option = accounts.get_mut(&tx.from);
             if option.is_none() {
                 // TODO: this is gnarly because the counters are static atomics
                 if !self.is_leader {
@@ -283,7 +287,7 @@ impl Bank {
         }
 
         if purge {
-            bals.remove(&tx.from);
+            accounts.remove(&tx.from);
         }
 
         Ok(())
@@ -335,10 +339,10 @@ impl Bank {
     /// Process a Transaction. If it contains a payment plan that requires a witness
     /// to progress, the payment plan will be stored in the bank.
     pub fn process_transaction(&self, tx: &Transaction) -> Result<()> {
-        let bals = &mut self.accounts.write().unwrap();
-        self.apply_debits(tx, bals)?;
-        self.apply_credits(tx, bals);
-        self.save_data(tx, bals);
+        let accounts = &mut self.accounts.write().unwrap();
+        self.apply_debits(tx, accounts)?;
+        self.apply_credits(tx, accounts);
+        self.save_data(tx, accounts);
         self.transaction_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
@@ -346,13 +350,13 @@ impl Bank {
     /// Process a batch of transactions.
     #[must_use]
     pub fn process_transactions(&self, txs: Vec<Transaction>) -> Vec<Result<Transaction>> {
-        let bals = &mut self.accounts.write().unwrap();
+        let accounts = &mut self.accounts.write().unwrap();
         debug!("processing Transactions {}", txs.len());
         let txs_len = txs.len();
         let now = Instant::now();
         let results: Vec<_> = txs
             .into_iter()
-            .map(|tx| self.apply_debits(&tx, bals).map(|_| tx))
+            .map(|tx| self.apply_debits(&tx, accounts).map(|_| tx))
             .collect(); // Calling collect() here forces all debits to complete before moving on.
 
         let debits = now.elapsed();
@@ -362,7 +366,7 @@ impl Bank {
             .into_iter()
             .map(|result| {
                 result.map(|tx| {
-                    self.apply_credits(&tx, bals);
+                    self.apply_credits(&tx, accounts);
                     tx
                 })
             })
@@ -595,11 +599,11 @@ impl Bank {
     }
 
     pub fn get_account(&self, pubkey: &Pubkey) -> Option<Account> {
-        let bals = self
+        let accounts = self
             .accounts
             .read()
             .expect("'accounts' read lock in get_balance");
-        bals.get(pubkey).cloned()
+        accounts.get(pubkey).cloned()
     }
 
     pub fn transaction_count(&self) -> usize {

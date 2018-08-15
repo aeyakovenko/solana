@@ -342,21 +342,24 @@ mod tests {
     }
     #[test]
     fn test_userdata_layout() {
-        let mut tx = test_tx();
-        tx.userdata = Some(vec![1, 2, 3]);
-        let sign_data = tx.get_sign_data();
-        let tx_bytes = serialize(&tx).unwrap();
+        let mut tx0 = test_tx();
+        tx0.userdata = Some(vec![1, 2, 3]);
+        let sign_data0a = tx0.get_sign_data();
+        let tx_bytes = serialize(&tx0).unwrap();
         assert!(tx_bytes.len() < 256);
-        assert_matches!(memfind(&tx_bytes, &sign_data), Some(SIGNED_DATA_OFFSET));
-        assert_matches!(memfind(&tx_bytes, &tx.signature.as_ref()), Some(SIG_OFFSET));
-        assert_matches!(memfind(&tx_bytes, &tx.from.as_ref()), Some(PUB_KEY_OFFSET));
-        let tx2 = deserialize(&tx_bytes).unwrap();
-        assert_eq!(tx, tx2);
-        assert_eq!(tx2.userdata, Some(vec![1, 2, 3]));
+        assert_eq!(memfind(&tx_bytes, &sign_data0a), Some(SIGNED_DATA_OFFSET));
+        assert_eq!(
+            memfind(&tx_bytes, &tx0.signature.as_ref()),
+            Some(SIG_OFFSET)
+        );
+        assert_eq!(memfind(&tx_bytes, &tx0.from.as_ref()), Some(PUB_KEY_OFFSET));
+        let tx1 = deserialize(&tx_bytes).unwrap();
+        assert_eq!(tx, tx1);
+        assert_eq!(tx1.userdata, Some(vec![1, 2, 3]));
 
-        tx.userdata = Some(vec![1, 2, 4]);
-        let sign_data2 = tx.get_sign_data();
-        assert_ne!(sign_data, sign_data2);
+        tx0.userdata = Some(vec![1, 2, 4]);
+        let sign_data0b = tx0.get_sign_data();
+        assert_ne!(sign_data0a, sign_data0b);
     }
 
     #[test]

@@ -180,7 +180,7 @@ fn test_multi_node_ledger_window() -> result::Result<()> {
         let mut client = mk_client(&validator_data);
         let bal = client.poll_get_balance(&bob_pubkey);
         info!("bob balance on validator {:?}...", bal);
-        if bal.unwrap_or(-1) == leader_balance {
+        if bal.unwrap_or(0) == leader_balance {
             break;
         }
         sleep(Duration::from_millis(300));
