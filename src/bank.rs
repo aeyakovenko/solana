@@ -149,7 +149,7 @@ impl Bank {
     fn apply_payment(&self, payment: &Payment, accounts: &mut HashMap<Pubkey, Account>) {
         accounts
             .entry(payment.to)
-            .or_insert(Account::default())
+            .or_insert_with(Account::default)
             .tokens += payment.tokens;
     }
 
@@ -323,7 +323,7 @@ impl Bank {
         if let Some(ref userdata) = tx.userdata {
             let mut data = &mut accounts
                 .entry(tx.from)
-                .or_insert(Account::default())
+                .or_insert_with(Account::default)
                 .userdata;
             if data.len() != userdata.len() {
                 data.resize(userdata.len(), 0);
