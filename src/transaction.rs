@@ -354,7 +354,7 @@ mod tests {
         );
         assert_eq!(memfind(&tx_bytes, &tx0.from.as_ref()), Some(PUB_KEY_OFFSET));
         let tx1 = deserialize(&tx_bytes).unwrap();
-        assert_eq!(tx, tx1);
+        assert_eq!(tx0, tx1);
         assert_eq!(tx1.userdata, Some(vec![1, 2, 3]));
 
         tx0.userdata = Some(vec![1, 2, 4]);
