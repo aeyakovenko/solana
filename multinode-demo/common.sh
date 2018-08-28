@@ -158,6 +158,9 @@ tune_networking() {
 
       sysctl net.core.rmem_default 2>/dev/null 1>/dev/null &&
           sudo sysctl -w net.core.rmem_default=26214400 1>/dev/null 2>/dev/null
+
+      sysctl net.core.netdev_max_backlog 2>/dev/null 1>/dev/null &&
+        sudo sysctl -w net.core.netdev_max_backlog=65000 1>/dev/null 2>/dev/null
     ) || true
   fi
 
