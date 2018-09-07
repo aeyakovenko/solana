@@ -176,22 +176,22 @@ impl Bank {
         Ok(())
     }
 
-    ///// Forget the given `signature` because its transaction was rejected.
-    //fn forget_signature(signatures: &mut HashSet<Signature>, signature: &Signature) {
-    //    signatures.remove(signature);
-    //}
+    /// Forget the given `signature` because its transaction was rejected.
+    fn forget_signature(signatures: &mut HashSet<Signature>, signature: &Signature) {
+        signatures.remove(signature);
+    }
 
-    ///// Forget the given `signature` with `last_id` because the transaction was rejected.
-    //fn forget_signature_with_last_id(&self, signature: &Signature, last_id: &Hash) {
-    //    if let Some(entry) = self
-    //        .last_ids_sigs
-    //        .write()
-    //        .expect("'last_ids' read lock in forget_signature_with_last_id")
-    //        .get_mut(last_id)
-    //    {
-    //        Self::forget_signature(&mut entry.0, signature);
-    //    }
-    //}
+    /// Forget the given `signature` with `last_id` because the transaction was rejected.
+    fn forget_signature_with_last_id(&self, signature: &Signature, last_id: &Hash) {
+        if let Some(entry) = self
+            .last_ids_sigs
+            .write()
+            .expect("'last_ids' read lock in forget_signature_with_last_id")
+            .get_mut(last_id)
+        {
+            Self::forget_signature(&mut entry.0, signature);
+        }
+    }
 
     /// Forget all signatures. Useful for benchmarking.
     pub fn clear_signatures(&self) {
@@ -457,7 +457,7 @@ impl Bank {
         let load_elapsed = now.elapsed();
         let now = Instant::now();
 
-        let res: Vec<Result<Transaction>> = loaded_accounts
+        let results: Vec<Result<Transaction>> = loaded_accounts
             .iter_mut()
             .zip(txs.into_iter())
             .map(|(acc, tx)| match acc {
@@ -467,7 +467,15 @@ impl Bank {
             .collect();
         let execution_elapsed = now.elapsed();
         let now = Instant::now();
-        Self::store_accounts(&res, &loaded_accounts, &mut accounts);
+        Self::store_accounts(&results, &loaded_accounts, &mut accounts);
+        txs.iter()
+            .zip(results.iter().zip(loaded_accounts.iter()))
+            .for_each(|tup| match tup {
+                (tx, (Ok(_), Err(_))) => {
+                    self.forget_signature_with_last_id(&tx.signature, &tx.last_id)
+                }
+                _ => (),
+            });
         let write_elapsed = now.elapsed();
         debug!(
             "load: {} us execution: {} us write: {} us tx: {}",
@@ -478,7 +486,7 @@ impl Bank {
         );
         let mut tx_count = 0;
         let mut err_count = 0;
-        for r in &res {
+        for r in &results {
             if r.is_ok() {
                 tx_count += 1;
             } else {
@@ -510,7 +518,7 @@ impl Bank {
         }
         self.transaction_count
             .fetch_add(tx_count, Ordering::Relaxed);
-        res
+        results
     }
 
     pub fn process_entry(&self, entry: Entry) -> Result<()> {
@@ -806,6 +814,21 @@ mod tests {
             Err(BankError::NegativeTokens)
         );
         assert_eq!(bank.transaction_count(), 0);
+    }
+
+    #[test]
+    fn test_signature_rollback() {
+        let mint = Mint::new(1);
+        let bank = Bank::new(&mint);
+
+        let tx = Transaction::new(&mint.keypair(), mint.keypair().pubkey(), -1, mint.last_id());
+        let signature = tx.signature;
+        assert!(!bank.has_signature(&signature));
+        assert_eq!(
+            bank.process_transaction(&tx),
+            Err(BankError::NegativeTokens)
+        );
+        assert!(!bank.has_signature(&signature));
     }
 
     #[test]
