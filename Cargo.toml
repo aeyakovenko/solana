@@ -110,10 +110,6 @@ tokio = "0.1"
 tokio-codec = "0.1"
 untrusted = "0.6.2"
 
-[dev-dependencies]
-noop = { path = "programs/noop" }
-print = { path = "programs/print" }
-move_funds = { path = "programs/move_funds" }
 
 [[bench]]
 name = "bank"
@@ -129,6 +125,11 @@ name = "signature"
 
 [[bench]]
 name = "sigverify"
+
+[dev-dependencies]
+noop = { path = "programs/noop" }
+print = { path = "programs/print" }
+move_funds = { path = "programs/move_funds" }
 
 [workspace]
 members = [
