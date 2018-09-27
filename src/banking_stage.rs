@@ -26,7 +26,7 @@ use timing;
 use transaction::Transaction;
 
 // number of threads is 1 until mt bank is ready
-pub const NUM_THREADS: usize = 1;
+pub const NUM_THREADS: usize = 10;
 
 /// Stores the stage's thread handle and output receiver.
 pub struct BankingStage {
@@ -403,11 +403,10 @@ mod tests {
         // the account balance below zero before the credit is added.
         let bank = Bank::new(&mint);
         for entry in entries {
-            assert!(
-                bank.process_transactions(&entry.transactions)
-                    .into_iter()
-                    .all(|x| x.is_ok())
-            );
+            bank.process_transactions(&entry.transactions)
+                .iter()
+                .for_each(|x| assert_eq!(*x, Ok(())));
+            bank.unlock_accounts(&entry.transactions);
         }
         assert_eq!(bank.get_balance(&alice.pubkey()), 1);
     }
