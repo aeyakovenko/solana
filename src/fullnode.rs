@@ -625,6 +625,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_validator_to_leader_transition() {
         // Make a leader identity
         let leader_keypair = Keypair::new();
