@@ -165,23 +165,14 @@ impl BankingStage {
         while chunk_start != transactions.len() {
             let chunk_end = chunk_start + Entry::num_will_fit(&transactions[chunk_start..]);
 
-            let results = bank.process_transactions(&transactions[chunk_start..chunk_end]);
+            let (locked_txs, results) =
+                bank.process_transactions(transactions[chunk_start..chunk_end].to_vec());
+            locked_txs.filter(results);
 
-            let processed_transactions: Vec<_> = transactions[chunk_start..chunk_end]
-                .into_iter()
-                .enumerate()
-                .filter_map(|(i, x)| match results[i] {
-                    Ok(_) => Some(x.clone()),
-                    Err(ref e) => {
-                        debug!("process transaction failed {:?}", e);
-                        None
-                    }
-                }).collect();
-
-            if !processed_transactions.is_empty() {
-                let hash = Transaction::hash(&processed_transactions);
-                debug!("processed ok: {} {}", processed_transactions.len(), hash);
-                poh.record(hash, processed_transactions)?;
+            if !locked_txs.transactions.is_empty() {
+                let hash = Transaction::hash(&locked_txs.transactions);
+                debug!("processed ok: {} {}", locked_txs.transactions.len(), hash);
+                poh.record(hash, locked_txs)?;
             }
             chunk_start = chunk_end;
         }
@@ -404,9 +395,9 @@ mod tests {
         let bank = Bank::new(&mint);
         for entry in entries {
             bank.process_transactions(&entry.transactions)
+                .1
                 .iter()
                 .for_each(|x| assert_eq!(*x, Ok(())));
-            bank.unlock_accounts(&entry.transactions);
         }
         assert_eq!(bank.get_balance(&alice.pubkey()), 1);
     }

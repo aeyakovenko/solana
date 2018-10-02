@@ -22,7 +22,7 @@ use std;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::result;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
 use storage_program::StorageProgram;
 use system_program::SystemProgram;
@@ -47,7 +47,7 @@ pub const VERIFY_BLOCK_SIZE: usize = 16;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum BankError {
     /// This Pubkey is being processed in another transaction
-    AccountInProgress,
+    AccountInUse,
 
     /// Attempt to debit from `Pubkey`, but no found no record of a prior credit.
     AccountNotFound,
@@ -90,6 +90,69 @@ pub enum BankError {
     ProgramRuntimeError(u8),
 }
 
+pub struct LockedTransactions {
+    pub transactions: Vec<Transaction>,
+    account_locks: Arc<Mutex<HashSet<Pubkey>>>,
+}
+
+impl LockedTransactions {
+    fn new(transactions: Vec<Transaction>, account_locks: Arc<Mutex<HashSet<Pubkey>>>) -> Self {
+        LockedTransactions {
+            transactions,
+            account_locks,
+        }
+    }
+    pub fn unwrap(self) -> Vec<Transaction> {
+        self.transactions
+    }
+    fn unlock_account_for_error(
+        account_locks: &mut HashSet<Pubkey>,
+        tx: &Transaction,
+        result: &Result<()>,
+    ) {
+        match result {
+            Ok(_) => (),
+            Err(BankError::AccountInUse) => (),
+            // keys were stored
+            _ => {
+                for k in &tx.account_keys {
+                    account_locks.remove(k);
+                }
+            }
+        }
+    }
+    pub fn filter(&mut self, results: Vec<Result<()>>) {
+        {
+            let mut account_locks = self.account_locks.lock().unwrap();
+            self.transactions
+                .iter()
+                .zip(results.iter())
+                .for_each(|(tx, res)| Self::unlock_account_for_error(&mut account_locks, tx, res));
+        }
+        let processed_transactions: Vec<_> = self
+            .transactions
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, x)| match results[i] {
+                Ok(_) => Some(x.clone()),
+                Err(ref e) => {
+                    debug!("process transaction failed {:?}", e);
+                    None
+                }
+            }).collect();
+        self.transactions = processed_transactions;
+    }
+}
+// Implement a destructor for Finalizer.
+impl Drop for LockedTransactions {
+    fn drop(&mut self) {
+        let mut account_locks = self.account_locks.lock().unwrap();
+        self.transactions
+            .iter()
+            .for_each(|tx| Bank::unlock_account(&mut account_locks, tx));
+    }
+}
+
 pub type Result<T> = result::Result<T, BankError>;
 type SignatureStatusMap = HashMap<Signature, Result<()>>;
 
@@ -105,7 +168,7 @@ pub struct Bank {
     accounts: RwLock<HashMap<Pubkey, Account>>,
 
     /// set of accounts which are currently in the pipeline
-    account_locks: Mutex<HashSet<Pubkey>>,
+    account_locks: Arc<Mutex<HashSet<Pubkey>>>,
 
     /// A FIFO queue of `last_id` items, where each item is a set of signatures
     /// that have been processed using that `last_id`. Rejected `last_id`
@@ -135,7 +198,7 @@ impl Default for Bank {
     fn default() -> Self {
         Bank {
             accounts: RwLock::new(HashMap::new()),
-            account_locks: Mutex::new(HashSet::new()),
+            account_locks: Arc::New(Mutex::new(HashSet::new())),
             last_ids: RwLock::new(VecDeque::new()),
             last_ids_sigs: RwLock::new(HashMap::new()),
             transaction_count: AtomicUsize::new(0),
@@ -295,30 +358,24 @@ impl Bank {
 
     /// Process a Transaction. This is used for unit tests and simply calls the vector Bank::process_transactions method.
     pub fn process_transaction(&self, tx: &Transaction) -> Result<()> {
-        let rv = match self.process_transactions(&[tx.clone()])[0] {
+        match self.process_transactions(vec![tx.clone()])[0].1 {
             Err(ref e) => {
                 info!("process_transaction error: {:?}", e);
                 Err((*e).clone())
             }
             Ok(_) => Ok(()),
-        };
-        if rv.is_ok() {
-            // unlock the account if transaction is successfull
-            // bank will unlock failed transactions automatically
-            self.unlock_accounts(&[tx.clone()]);
         }
-        rv
     }
     fn lock_account(
-        keys: &[Pubkey],
         account_locks: &mut HashSet<Pubkey>,
+        keys: &[Pubkey],
         error_counters: &mut ErrorCounters,
     ) -> Result<()> {
         // Copy all the accounts
         for k in keys {
             if account_locks.contains(k) {
                 error_counters.account_in_progress += 1;
-                return Err(BankError::AccountInProgress);
+                return Err(BankError::AccountInUse);
             }
         }
         for k in keys {
@@ -327,26 +384,9 @@ impl Bank {
         Ok(())
     }
 
-    fn unlock_account(tx: &Transaction, account_locks: &mut HashSet<Pubkey>) {
+    fn unlock_account(account_locks: &mut HashSet<Pubkey>, tx: &Transaction) {
         for k in &tx.account_keys {
             account_locks.remove(k);
-        }
-    }
-
-    fn unlock_account_for_error(
-        tx: &Transaction,
-        result: &Result<()>,
-        account_locks: &mut HashSet<Pubkey>,
-    ) {
-        match result {
-            Ok(_) => (),
-            Err(BankError::AccountInProgress) => (),
-            // keys were stored
-            _ => {
-                for k in &tx.account_keys {
-                    account_locks.remove(k);
-                }
-            }
         }
     }
 
@@ -384,20 +424,23 @@ impl Bank {
     }
     fn lock_accounts(
         &self,
-        txs: &[Transaction],
-        error_counters: &mut ErrorCounters,
-    ) -> Vec<Result<()>> {
+        txs: Vec<Transaction>,
+    ) -> (LockedTransactions, Vec<Result<()>>) {
+        let mut error_counters = ErrorCounters::default();
         let mut account_locks = self.account_locks.lock().unwrap();
-        txs.iter()
-            .map(|tx| Self::lock_account(&tx.account_keys, &mut account_locks, error_counters))
-            .collect()
-    }
-
-    fn unlock_accounts_for_errors(&self, txs: &[Transaction], results: &[Result<()>]) {
-        let mut account_locks = self.account_locks.lock().unwrap();
-        txs.iter()
-            .zip(results.iter())
-            .for_each(|(tx, res)| Self::unlock_account_for_error(tx, res, &mut account_locks));
+        let res = txs
+            .iter()
+            .map(|tx| Self::lock_account(&mut account_locks, &tx.account_keys, error_counters))
+            .collect();
+        (
+            LockedTransactions::new(txs, self.account_locks.clone()),
+            res,
+        )
+         inc_new_counter_info!(
+            "bank-process_transactions-account_in_progress",
+            error_counters.account_in_progress
+        ); 
+        res
     }
 
     /// This function is used to tell the bank pipeline that the accounts should be unlocked
@@ -601,15 +644,20 @@ impl Bank {
 
     /// Process a batch of transactions.
     #[must_use]
-    pub fn process_transactions(&self, txs: &[Transaction]) -> Vec<Result<()>> {
+    pub fn process_transactions(
+        &self,
+        locked_txs: &LockedTransactions,
+        locked_account_results: Vec<Result<()>>,
+    ) -> Vec<Result<()>> {
         debug!("processing transactions: {}", txs.len());
         let txs_len = txs.len();
         let mut error_counters = ErrorCounters::default();
         let now = Instant::now();
-        let locked_accounts = self.lock_accounts(txs, &mut error_counters);
+        let txs = &locked_txs.transactions;
         let lock_time = now.elapsed();
         let now = Instant::now();
-        let mut loaded_accounts = self.load_accounts(txs, locked_accounts, &mut error_counters);
+        let mut loaded_accounts =
+            self.load_accounts(txs, locked_account_results, &mut error_counters);
         let load_elapsed = now.elapsed();
         let now = Instant::now();
         let executed: Vec<Result<()>> = loaded_accounts
@@ -667,10 +715,7 @@ impl Bank {
             }
             inc_new_counter_info!("bank-process_transactions-error_count", err_count);
         }
-        inc_new_counter_info!(
-            "bank-process_transactions-account_in_progress",
-            error_counters.account_in_progress
-        );
+
         self.transaction_count
             .fetch_add(tx_count, Ordering::Relaxed);
         inc_new_counter_info!("bank-process_transactions-txs", tx_count);
@@ -679,10 +724,10 @@ impl Bank {
 
     pub fn process_entry(&self, entry: &Entry) -> Result<()> {
         if !entry.transactions.is_empty() {
-            for result in self.process_transactions(&entry.transactions) {
+            let (locked, locked_results) = self.lock_accounts(entry.transactions.clone());
+            for result in self.process_transactions(&locked, locked_results) {
                 result?;
             }
-            self.unlock_accounts(&entry.transactions);
         }
         self.register_entry_id(&entry.id);
         Ok(())
@@ -946,7 +991,7 @@ mod tests {
             bank.register_entry_id(&last_id);
             let tx = Transaction::system_move(&mint.keypair(), key1, 1, last_id, 0);
             let res = bank.process_transactions(&vec![tx.clone()]);
-            assert!(res[0].is_ok());
+            assert_eq!(res[0], Ok(()));
             assert_eq!(bank.get_signature(&tx.last_id, &tx.signature), Some(Ok(())));
         }
         {
@@ -957,7 +1002,7 @@ mod tests {
             assert!(res[0].is_err());
             assert_eq!(
                 bank.get_signature(&tx.last_id, &tx.signature),
-                Some(Err(BankError::AccountInProgress))
+                Some(Err(BankError::AccountInUse))
             );
             bank.unlock_accounts(&vec![tx.clone()]);
         }
@@ -966,7 +1011,7 @@ mod tests {
             bank.register_entry_id(&last_id);
             let tx = Transaction::system_move(&mint.keypair(), key1, 1, last_id, 0);
             let res = bank.process_transactions(&vec![tx.clone()]);
-            assert!(res[0].is_ok());
+            assert_eq!(res[0], Ok(()));
             bank.unlock_accounts(&vec![tx.clone()]);
             assert_eq!(bank.get_balance(&key1), 2);
         }
@@ -984,8 +1029,8 @@ mod tests {
         let t2 = Transaction::system_move(&mint.keypair(), key2, 1, mint.last_id(), 0);
         let res = bank.process_transactions(&vec![t1.clone(), t2.clone()]);
         assert_eq!(res.len(), 2);
-        assert!(res[0].is_ok());
-        assert_eq!(res[1], Err(BankError::AccountInProgress));
+        assert_eq!(res[0], Ok(()));
+        assert_eq!(res[1], Err(BankError::AccountInUse));
         assert_eq!(bank.get_balance(&mint.pubkey()), 0);
         assert_eq!(bank.get_balance(&key1), 1);
         assert_eq!(bank.get_balance(&key2), 0);
@@ -993,7 +1038,7 @@ mod tests {
         // TODO: Transactions that fail to pay a fee could be dropped silently
         assert_eq!(
             bank.get_signature(&t2.last_id, &t2.signature),
-            Some(Err(BankError::AccountInProgress))
+            Some(Err(BankError::AccountInUse))
         );
     }
 
@@ -1067,7 +1112,7 @@ mod tests {
         );
         let res = bank.process_transactions(&vec![t1.clone()]);
         assert_eq!(res.len(), 1);
-        assert!(res[0].is_ok());
+        assert_eq!(res[0], Ok(()));
         assert_eq!(bank.get_balance(&mint.pubkey()), 0);
         assert_eq!(bank.get_balance(&key1), 1);
         assert_eq!(bank.get_balance(&key2), 1);
@@ -1189,8 +1234,8 @@ mod tests {
             .unwrap();
         bank.clear_signatures();
         assert!(
-            bank.reserve_signature_with_last_id_test(&signature, &mint.last_id())
-                .is_ok()
+            bank.reserve_signature_with_last_id_test(&signature, &mint.last_id()),
+            Ok(())
         );
     }
 

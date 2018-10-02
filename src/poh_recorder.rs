@@ -1,7 +1,7 @@
 //! The `poh_recorder` module provides an object for synchronizing with Proof of History.
 //! It synchronizes PoH, bank's register_entry_id and the ledger
 //!
-use bank::Bank;
+use bank::{Bank, LockedTransactions};
 use entry::Entry;
 use hash::Hash;
 use poh::Poh;
@@ -48,12 +48,12 @@ impl PohRecorder {
         Ok(())
     }
 
-    pub fn record(&self, mixin: Hash, txs: Vec<Transaction>) -> Result<()> {
+    pub fn record(&self, mixin: Hash, locked_txs: LockedTransactions) -> Result<()> {
         // Register and send the entry out while holding the lock.
         // This guarantees PoH order and Entry production and banks LastId queue is the same.
         let mut poh = self.poh.lock().unwrap();
         let tick = poh.record(mixin);
-        self.bank.unlock_accounts(&txs);
+        let txs = locked_txs.unwrap();
         self.bank.register_entry_id(&tick.id);
         let entry = Entry {
             num_hashes: tick.num_hashes,
