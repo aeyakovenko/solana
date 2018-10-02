@@ -1154,7 +1154,7 @@ mod tests {
         let res = bank.process_transaction(&tx);
 
         // Result failed, but signature is registered
-        assert!(!res.is_ok());
+        assert!(res.is_err());
         assert!(bank.has_signature(&signature));
         assert_matches!(
             bank.get_signature_status(&signature),
@@ -1215,9 +1215,9 @@ mod tests {
         let mint = Mint::new(1);
         let bank = Bank::new(&mint);
         let signature = Signature::default();
-        assert!(
+        assert_eq!(
             bank.reserve_signature_with_last_id_test(&signature, &mint.last_id())
-                .is_ok()
+            ,Ok(())
         );
         assert_eq!(
             bank.reserve_signature_with_last_id_test(&signature, &mint.last_id()),
@@ -1246,7 +1246,7 @@ mod tests {
         let signature = Signature::default();
         bank.reserve_signature_with_last_id_test(&signature, &mint.last_id())
             .expect("reserve signature");
-        assert!(bank.get_signature_status(&signature).is_ok());
+        assert_eq!(bank.get_signature_status(&signature), Ok(()));
     }
 
     #[test]
@@ -1323,7 +1323,7 @@ mod tests {
 
         // Now ensure the TX is accepted despite pointing to the ID of an empty entry.
         bank.process_entries(&[entry]).unwrap();
-        assert!(bank.process_transaction(&tx).is_ok());
+        assert_eq!(bank.process_transaction(&tx), Ok(()));
     }
 
     #[test]
