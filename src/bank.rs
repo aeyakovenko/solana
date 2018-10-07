@@ -753,6 +753,7 @@ impl Bank {
         self.transaction_count
             .fetch_add(tx_count, Ordering::Relaxed);
         inc_new_counter_info!("bank-process_transactions-txs", tx_count);
+        inc_new_counter_info!("bank-process_transactions-old_last_id", error_counters.old_last_id);
         executed
     }
 
