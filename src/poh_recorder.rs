@@ -53,7 +53,7 @@ impl PohRecorder {
         // This guarantees PoH order and Entry production and banks LastId queue is the same.
         let mut poh = self.poh.lock().unwrap();
         let tick = poh.record(mixin);
-        self.bank.register_entry_id(&tick.id);
+        // don't register an entry
         let entry = Entry {
             num_hashes: tick.num_hashes,
             id: tick.id,

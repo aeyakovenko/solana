@@ -41,7 +41,8 @@ use window::WINDOW_SIZE;
 /// but requires clients to update its `last_id` more frequently. Raising the value
 /// lengthens the time a client must wait to be certain a missing transaction will
 /// not be processed by the network.
-pub const MAX_ENTRY_IDS: usize = 1024 * 32;
+pub const NUM_TICKS_PER_SECOND: usize = 10;
+pub const MAX_ENTRY_IDS: usize = NUM_TICKS_PER_SECOND * 32;
 
 pub const VERIFY_BLOCK_SIZE: usize = 16;
 
@@ -103,6 +104,7 @@ struct ErrorCounters {
     account_not_found_validator: usize,
     account_not_found_leader: usize,
     account_in_use: usize,
+    last_id_to_old: usize,
 }
 /// The state of all accounts and contracts after processing its entries.
 pub struct Bank {
@@ -210,6 +212,15 @@ impl Bank {
         for (_, sigs) in self.last_ids_sigs.write().unwrap().iter_mut() {
             sigs.0.clear();
         }
+    }
+
+    fn check_last_id_age(last_id_queue: &VecDeque<Hash>, last_id: Hash) -> usize {
+        for (i, id) in last_id_queue.iter().enuemrate() {
+            if *id == last_id {
+                return last_id_queue.len() - i;
+            }
+        }
+        last_id_queue.len() + 1
     }
 
     fn reserve_signature_with_last_id(
@@ -341,6 +352,8 @@ impl Bank {
         tx: &Transaction,
         accounts: &HashMap<Pubkey, Account>,
         last_ids_sigs: &mut HashMap<Hash, (SignatureStatusMap, u64)>,
+        last_ids: &VecDeque<Hash>,
+        max_age: usize,
         error_counters: &mut ErrorCounters,
     ) -> Result<Vec<Account>> {
         // Copy all the accounts
@@ -359,6 +372,11 @@ impl Bank {
                 .iter()
                 .map(|key| accounts.get(key).cloned().unwrap_or_default())
                 .collect();
+            let age = check_last_id_age(last_ids, tx.last_id);
+            if age > max_age {
+                error_counters.old_last_id += 1;
+                return Err(BankError::LastIdNotFound);
+            }
             // There is no way to predict what contract will execute without an error
             // If a fee can pay for execution then the contract will be scheduled
             let err =
@@ -399,14 +417,23 @@ impl Bank {
         &self,
         txs: &[Transaction],
         results: Vec<Result<()>>,
+        max_age: usize,
         error_counters: &mut ErrorCounters,
     ) -> Vec<(Result<Vec<Account>>)> {
         let accounts = self.accounts.read().unwrap();
         let mut last_sigs = self.last_ids_sigs.write().unwrap();
+        let last_ids = self.last_ids.read().unwrap();
         txs.iter()
             .zip(results.into_iter())
             .map(|etx| match etx {
-                (tx, Ok(())) => self.load_account(tx, &accounts, &mut last_sigs, error_counters),
+                (tx, Ok(())) => self.load_account(
+                    tx,
+                    &accounts,
+                    &mut last_sigs,
+                    &last_ids,
+                    max_age,
+                    error_counters,
+                ),
                 (_, Err(e)) => Err(e),
             }).collect()
     }
@@ -605,7 +632,11 @@ impl Bank {
         let locked_accounts = self.lock_accounts(txs);
         let lock_time = now.elapsed();
         let now = Instant::now();
-        let results = self.execute_and_commit_transactions(txs, locked_accounts);
+        // Use a shorter maximum age when adding transactions into the pipeline.  This will reduce
+        // the likelyhood of any single thread getting starved and processing old ids.
+        // TODO: Banking stage threads should be prioratized to complete faster then this queue
+        // expires.
+        let results = self.execute_and_commit_transactions(txs, locked_accounts, MAX_ENTRY_IDS / 2);
         let process_time = now.elapsed();
         let now = Instant::now();
         self.record_transactions(txs, &results, poh)?;
@@ -660,11 +691,13 @@ impl Bank {
         &self,
         txs: &[Transaction],
         locked_accounts: Vec<Result<()>>,
+        max_age: usize,
     ) -> Vec<Result<()>> {
         debug!("processing transactions: {}", txs.len());
         let mut error_counters = ErrorCounters::default();
         let now = Instant::now();
-        let mut loaded_accounts = self.load_accounts(txs, locked_accounts, &mut error_counters);
+        let mut loaded_accounts =
+            self.load_accounts(txs, locked_accounts, max_age, &mut error_counters);
         let load_elapsed = now.elapsed();
         let now = Instant::now();
         let executed: Vec<Result<()>> = loaded_accounts
@@ -726,7 +759,7 @@ impl Bank {
     #[must_use]
     pub fn process_transactions(&self, txs: &[Transaction]) -> Vec<Result<()>> {
         let locked_accounts = self.lock_accounts(txs);
-        let results = self.execute_and_commit_transactions(txs, locked_accounts);
+        let results = self.execute_and_commit_transactions(txs, locked_accounts, MAX_ENTRY_IDS);
         self.unlock_accounts(txs, &results);
         results
     }
@@ -736,8 +769,9 @@ impl Bank {
             for result in self.process_transactions(&entry.transactions) {
                 result?;
             }
+        } else {
+            self.register_entry_id(&entry.id);
         }
-        self.register_entry_id(&entry.id);
         Ok(())
     }
 
@@ -1317,23 +1351,34 @@ mod tests {
         entries.into_iter()
     }
 
-    fn create_sample_block(mint: &Mint, length: usize) -> impl Iterator<Item = Entry> {
+    // create a ledger with tick entries every `ticks` entries
+    fn create_sample_block_with_ticks(
+        mint: &Mint,
+        length: usize,
+        ticks: usize,
+    ) -> impl Iterator<Item = Entry> {
         let mut entries = Vec::with_capacity(length);
         let mut hash = mint.last_id();
+        let mut last_id = mint.last_id();
         let mut num_hashes = 0;
-        for _ in 0..length {
+        for i in 0..length {
             let keypair = Keypair::new();
-            let tx = Transaction::system_new(&mint.keypair(), keypair.pubkey(), 1, hash);
+            let tx = Transaction::system_new(&mint.keypair(), keypair.pubkey(), 1, last_id);
             let entry = Entry::new_mut(&mut hash, &mut num_hashes, vec![tx]);
             entries.push(entry);
+            if (i + 1) % ticks == 0 {
+                let tick = Entry::new_mut(&mut hash, &mut num_hashes, vec![]);
+                last_id = hash;
+                entries.push(tick);
+            }
         }
         entries.into_iter()
     }
 
     fn create_sample_ledger(length: usize) -> (impl Iterator<Item = Entry>, Pubkey) {
-        let mint = Mint::new(1 + length as i64);
+        let mint = Mint::new(length as i64 + 1);
         let genesis = mint.create_entries();
-        let block = create_sample_block(&mint, length);
+        let block = create_sample_block_with_ticks(&mint, length, length);
         (genesis.into_iter().chain(block), mint.pubkey())
     }
 
@@ -1347,16 +1392,19 @@ mod tests {
     }
 
     #[test]
-    fn test_process_ledger() {
+    fn test_process_ledger_simple() {
         let (ledger, pubkey) = create_sample_ledger(1);
         let (ledger, dup) = ledger.tee();
         let bank = Bank::default();
         let (ledger_height, tail) = bank.process_ledger(ledger).unwrap();
         assert_eq!(bank.get_balance(&pubkey), 1);
-        assert_eq!(ledger_height, 3);
-        assert_eq!(tail.len(), 3);
+        assert_eq!(ledger_height, 4);
+        assert_eq!(tail.len(), 4);
         assert_eq!(tail, dup.collect_vec());
         let last_entry = &tail[tail.len() - 1];
+        // last entry is a tick
+        assert_eq!(0, last_entry.transactions.len());
+        // tick is registered
         assert_eq!(bank.last_id(), last_entry.id);
     }
 
@@ -1375,7 +1423,7 @@ mod tests {
             let bank = Bank::default();
             let (ledger_height, tail) = bank.process_ledger(ledger).unwrap();
             assert_eq!(bank.get_balance(&pubkey), 1);
-            assert_eq!(ledger_height, entry_count as u64 + 2);
+            assert_eq!(ledger_height, entry_count as u64 + 3);
             assert!(tail.len() <= window_size);
             let last_entry = &tail[tail.len() - 1];
             assert_eq!(bank.last_id(), last_entry.id);
@@ -1406,7 +1454,7 @@ mod tests {
     fn test_process_ledger_from_files() {
         let mint = Mint::new(2);
         let genesis = to_file_iter(mint.create_entries().into_iter());
-        let block = to_file_iter(create_sample_block(&mint, 1));
+        let block = to_file_iter(create_sample_block_with_ticks(&mint, 1, 1));
 
         let bank = Bank::default();
         bank.process_ledger(genesis.chain(block)).unwrap();
@@ -1468,7 +1516,8 @@ mod tests {
         let pay_alice = vec![tx1];
 
         let locked_alice = bank.lock_accounts(&pay_alice);
-        let results_alice = bank.execute_and_commit_transactions(&pay_alice, locked_alice);
+        let results_alice =
+            bank.execute_and_commit_transactions(&pay_alice, locked_alice, MAX_ENTRY_IDS);
         assert_eq!(results_alice[0], Ok(()));
 
         // try executing an interleaved transfer twice
