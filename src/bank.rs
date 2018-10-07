@@ -293,6 +293,7 @@ impl Bank {
     /// the oldest ones once its internal cache is full. Once boot, the
     /// bank will reject transactions using that `last_id`.
     pub fn register_entry_id(&self, last_id: &Hash) {
+        // this must be locked first!
         let mut last_ids = self
             .last_ids
             .write()
@@ -421,8 +422,9 @@ impl Bank {
         error_counters: &mut ErrorCounters,
     ) -> Vec<(Result<Vec<Account>>)> {
         let accounts = self.accounts.read().unwrap();
-        let mut last_sigs = self.last_ids_sigs.write().unwrap();
+        // this must be locked first!
         let last_ids = self.last_ids.read().unwrap();
+        let mut last_sigs = self.last_ids_sigs.write().unwrap();
         txs.iter()
             .zip(results.into_iter())
             .map(|etx| match etx {
@@ -753,7 +755,9 @@ impl Bank {
         self.transaction_count
             .fetch_add(tx_count, Ordering::Relaxed);
         inc_new_counter_info!("bank-process_transactions-txs", tx_count);
-        inc_new_counter_info!("bank-process_transactions-old_last_id", error_counters.old_last_id);
+        if 0 != error_counters.old_last_id {
+            inc_new_counter_info!("bank-process_transactions-old_last_id", error_counters.old_last_id);
+        }
         executed
     }
 
