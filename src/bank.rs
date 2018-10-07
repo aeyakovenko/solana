@@ -104,7 +104,7 @@ struct ErrorCounters {
     account_not_found_validator: usize,
     account_not_found_leader: usize,
     account_in_use: usize,
-    last_id_to_old: usize,
+    old_last_id: usize,
 }
 /// The state of all accounts and contracts after processing its entries.
 pub struct Bank {
@@ -215,7 +215,7 @@ impl Bank {
     }
 
     fn check_last_id_age(last_id_queue: &VecDeque<Hash>, last_id: Hash) -> usize {
-        for (i, id) in last_id_queue.iter().enuemrate() {
+        for (i, id) in last_id_queue.iter().enumerate() {
             if *id == last_id {
                 return last_id_queue.len() - i;
             }
@@ -372,7 +372,7 @@ impl Bank {
                 .iter()
                 .map(|key| accounts.get(key).cloned().unwrap_or_default())
                 .collect();
-            let age = check_last_id_age(last_ids, tx.last_id);
+            let age = Self::check_last_id_age(last_ids, tx.last_id);
             if age > max_age {
                 error_counters.old_last_id += 1;
                 return Err(BankError::LastIdNotFound);
@@ -1335,18 +1335,23 @@ mod tests {
         mint: &Mint,
         keypairs: &[Keypair],
     ) -> impl Iterator<Item = Entry> {
+        let mut last_id = mint.last_id();
         let mut hash = mint.last_id();
         let mut entries: Vec<Entry> = vec![];
+        let mut num_hashes = 0;
         for k in keypairs {
             let txs = vec![Transaction::system_new(
                 &mint.keypair(),
                 k.pubkey(),
                 1,
-                hash,
+                last_id,
             )];
             let mut e = ledger::next_entries(&hash, 0, txs);
             entries.append(&mut e);
             hash = entries.last().unwrap().id;
+            let tick = Entry::new_mut(&mut hash, &mut num_hashes, vec![]);
+            last_id = hash;
+            entries.push(tick);
         }
         entries.into_iter()
     }
@@ -1538,5 +1543,18 @@ mod tests {
             bank.transfer(2, &mint.keypair(), bob.pubkey(), mint.last_id()),
             Ok(_)
         );
+    }
+    #[test]
+    fn test_last_id_age() {
+        let mut q = VecDeque::new();
+        let hash1 = Hash::default();
+        let hash2 = hash(hash1.as_ref());
+        let hash3 = hash(hash2.as_ref());
+        q.push_back(hash1);
+        q.push_back(hash2);
+        q.push_back(hash3);
+        assert_eq!(Bank::check_last_id_age(&q, hash1), 3);
+        assert_eq!(Bank::check_last_id_age(&q, hash2), 2);
+        assert_eq!(Bank::check_last_id_age(&q, hash3), 1);
     }
 }
