@@ -2,6 +2,7 @@ extern crate bincode;
 #[macro_use]
 extern crate clap;
 extern crate influx_db_client;
+extern crate rand;
 extern crate rayon;
 extern crate serde_json;
 #[macro_use]
@@ -9,6 +10,7 @@ extern crate solana;
 
 use clap::{App, Arg};
 use influx_db_client as influxdb;
+use rand::{thread_rng, Rng};
 use rayon::prelude::*;
 use solana::client::mk_client;
 use solana::crdt::{Crdt, NodeInfo};
@@ -201,10 +203,11 @@ fn generate_txs(
     let bsps = (tx_count) as f64 / ns as f64;
     let nsps = ns as f64 / (tx_count) as f64;
     println!(
-        "Done. {:.2} thousand signatures per second, {:.2} us per signature, {} ms total time",
+        "Done. {:.2} thousand signatures per second, {:.2} us per signature, {} ms total time, {}",
         bsps * 1_000_000_f64,
         nsps / 1_000_f64,
         duration_as_ms(&duration),
+        last_id,
     );
     metrics::submit(
         influxdb::Point::new("bench-tps")
@@ -288,7 +291,6 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
     let mut notfunded: Vec<&Keypair> = dests.iter().collect();
     println!("funding keys {}", dests.len());
     while !notfunded.is_empty() {
-        let last_id = client.get_last_id();
         let mut new_funded: Vec<(&Keypair, i64)> = vec![];
         let mut to_fund = vec![];
         println!("creating from... {}", funded.len());
@@ -311,13 +313,25 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
             assert!(f.1 >= per_unit);
         }
         println!("generating... {}", to_fund.len());
-        let to_fund_txs: Vec<_> = to_fund
-            .par_iter()
-            .map(|(k, m)| Transaction::system_move_many(k, &m, last_id, 0))
-            .collect();
-        println!("transfering... {}", to_fund.len());
-        to_fund_txs.iter().for_each(|tx| {
-            let _ = client.transfer_signed(&tx).expect("transfer");
+        // try to transfer a few at a time with recent last_id
+        to_fund.chunks(10_000).for_each(|chunk| {
+            loop {
+                let last_id = client.get_last_id();
+                let mut to_fund_txs: Vec<_> = chunk
+                    .par_iter()
+                    .map(|(k, m)| Transaction::system_move_many(k, &m, last_id, 0))
+                    .collect();
+                // randomly distributed the failures
+                // which will allow the tests to function
+                thread_rng().shuffle(&mut to_fund_txs);
+                println!("transfering... {}", chunk.len());
+                to_fund_txs.iter().for_each(|tx| {
+                    let _ = client.transfer_signed(&tx).expect("transfer");
+                });
+                if client.get_balance(&to_fund_txs[0].account_keys[1]).unwrap_or(0) != 0 {
+                    break;
+                }
+            }
         });
         println!(
             "funded {} total: {} left: {}",
@@ -611,9 +625,11 @@ fn main() {
     let keypair0_balance = client.poll_get_balance(&keypairs[0].pubkey()).unwrap_or(0);
 
     if num_tokens_per_account > keypair0_balance {
-        let extra = (num_tokens_per_account - keypair0_balance) * (keypairs.len() as i64);
-        airdrop_tokens(&mut client, &leader, &id, extra);
-        fund_keys(&mut client, &id, &keypairs, num_tokens_per_account);
+        let extra = num_tokens_per_account - keypair0_balance;
+        let total = extra * (keypairs.len() as i64);
+        airdrop_tokens(&mut client, &leader, &id, total);
+        println!("adding more tokens {}", extra);
+        fund_keys(&mut client, &id, &keypairs, extra);
     }
     airdrop_tokens(&mut barrier_client, &leader, &barrier_id, 1);
 
