@@ -305,6 +305,7 @@ impl Bank {
             .expect("last_ids_sigs write lock");
         if last_ids.len() >= MAX_ENTRY_IDS {
             let id = last_ids.pop_front().unwrap();
+            info!("removing last_id {}", id);
             last_ids_sigs.remove(&id);
         }
         inc_new_counter_info!("bank-register_entry_id-registered", 1);

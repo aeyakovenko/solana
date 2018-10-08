@@ -318,13 +318,14 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
                 // most of the account pairs should have some funding in one of the pairs
                 // durring generate_tx step
                 thread_rng().shuffle(&mut to_fund_txs);
-                println!("transfering... {}", chunk.len());
+                println!("transfering... {} {}", chunk.len(), last_id);
                 to_fund_txs.iter().for_each(|tx| {
                     let _ = client.transfer_signed(&tx).expect("transfer");
                 });
                 thread_rng().shuffle(&mut to_fund_txs);
                 let mut done = true;
-                for tx in &to_fund_txs[..3] {
+                let max = cmp::min(10, to_fund_txs.len());
+                for tx in &to_fund_txs[..max] {
                     if client.get_balance(&tx.account_keys[1]).unwrap_or(0) == 0 {
                         done = false;
                     }
@@ -616,7 +617,7 @@ fn main() {
         total_keys += target;
         target = target / MAX_SPENDS_PER_TX;
     }
-    let gen_keypairs = rnd.gen_n_keypairs(total_keys);
+    let gen_keypairs = rnd.gen_n_keypairs(total_keys as i64);
     let barrier_id = rnd.gen_n_keypairs(1).pop().unwrap();
 
     println!("Get tokens...");
