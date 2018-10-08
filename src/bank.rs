@@ -42,7 +42,7 @@ use window::WINDOW_SIZE;
 /// lengthens the time a client must wait to be certain a missing transaction will
 /// not be processed by the network.
 pub const NUM_TICKS_PER_SECOND: usize = 10;
-pub const MAX_ENTRY_IDS: usize = NUM_TICKS_PER_SECOND * 32;
+pub const MAX_ENTRY_IDS: usize = NUM_TICKS_PER_SECOND * 60;
 
 pub const VERIFY_BLOCK_SIZE: usize = 16;
 
@@ -105,6 +105,7 @@ struct ErrorCounters {
     account_not_found_leader: usize,
     account_in_use: usize,
     old_last_id: usize,
+    reserve_last_id: usize,
 }
 /// The state of all accounts and contracts after processing its entries.
 pub struct Bank {
@@ -306,6 +307,7 @@ impl Bank {
             let id = last_ids.pop_front().unwrap();
             last_ids_sigs.remove(&id);
         }
+        inc_new_counter_info!("bank-register_entry_id-registered", 1);
         last_ids_sigs.insert(*last_id, (HashMap::new(), timestamp()));
         last_ids.push_back(*last_id);
     }
@@ -368,21 +370,26 @@ impl Bank {
         } else if accounts.get(&tx.account_keys[0]).unwrap().tokens < tx.fee {
             Err(BankError::InsufficientFundsForFee)
         } else {
+            let age = Self::check_last_id_age(last_ids, tx.last_id);
+            if age > max_age {
+                error_counters.old_last_id += 1;
+                //return Err(BankError::LastIdNotFound);
+            }
+
+
+            // There is no way to predict what contract will execute without an error
+            // If a fee can pay for execution then the contract will be scheduled
+            let err =
+                Self::reserve_signature_with_last_id(last_ids_sigs, &tx.last_id, &tx.signature);
+            if err.is_err() {
+                error_counters.reserve_last_id += 1;
+            }
+            err?;
             let mut called_accounts: Vec<Account> = tx
                 .account_keys
                 .iter()
                 .map(|key| accounts.get(key).cloned().unwrap_or_default())
                 .collect();
-            let age = Self::check_last_id_age(last_ids, tx.last_id);
-            if age > max_age {
-                error_counters.old_last_id += 1;
-                return Err(BankError::LastIdNotFound);
-            }
-            // There is no way to predict what contract will execute without an error
-            // If a fee can pay for execution then the contract will be scheduled
-            let err =
-                Self::reserve_signature_with_last_id(last_ids_sigs, &tx.last_id, &tx.signature);
-            err?;
             called_accounts[0].tokens -= tx.fee;
             Ok(called_accounts)
         }
@@ -398,10 +405,12 @@ impl Bank {
             .iter()
             .map(|tx| Self::lock_account(&mut account_locks, &tx.account_keys, &mut error_counters))
             .collect();
-        inc_new_counter_info!(
-            "bank-process_transactions-account_in_use",
-            error_counters.account_in_use
-        );
+        if error_counters.account_in_use != 0 {
+            inc_new_counter_info!(
+                "bank-process_transactions-account_in_use",
+                error_counters.account_in_use
+            );
+        }
         rv
     }
 
@@ -756,8 +765,17 @@ impl Bank {
             .fetch_add(tx_count, Ordering::Relaxed);
         inc_new_counter_info!("bank-process_transactions-txs", tx_count);
         if 0 != error_counters.old_last_id {
-            inc_new_counter_info!("bank-process_transactions-old_last_id", error_counters.old_last_id);
+            inc_new_counter_info!(
+                "bank-process_transactions-old_last_id",
+                error_counters.old_last_id
+            );
         }
+        if 0 != error_counters.reserve_last_id {
+            inc_new_counter_info!(
+                "bank-process_transactions-reserve_last_id",
+                error_counters.reserve_last_id
+            );
+        } 
         executed
     }
 
