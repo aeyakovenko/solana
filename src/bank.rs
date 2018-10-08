@@ -106,6 +106,8 @@ struct ErrorCounters {
     account_in_use: usize,
     old_last_id: usize,
     reserve_last_id: usize,
+    insufficient_funds: usize,
+    duplicate_signature: usize,
 }
 /// The state of all accounts and contracts after processing its entries.
 pub struct Bank {
@@ -369,6 +371,7 @@ impl Bank {
             }
             Err(BankError::AccountNotFound)
         } else if accounts.get(&tx.account_keys[0]).unwrap().tokens < tx.fee {
+            error_counters.insufficient_funds += 1;
             Err(BankError::InsufficientFundsForFee)
         } else {
             let age = Self::check_last_id_age(last_ids, tx.last_id);
@@ -381,8 +384,10 @@ impl Bank {
             // If a fee can pay for execution then the contract will be scheduled
             let err =
                 Self::reserve_signature_with_last_id(last_ids_sigs, &tx.last_id, &tx.signature);
-            if err.is_err() {
+            if let Err(BankError::LastIdNotFound) = err {
                 error_counters.reserve_last_id += 1;
+            } else if let Err(BankError::DuplicateSignature) = err {
+                error_counters.duplicate_signature += 1;
             }
             err?;
             let mut called_accounts: Vec<Account> = tx
@@ -774,6 +779,18 @@ impl Bank {
             inc_new_counter_info!(
                 "bank-process_transactions-reserve_last_id",
                 error_counters.reserve_last_id
+            );
+        }
+        if 0 != error_counters.duplicate_signature {
+            inc_new_counter_info!(
+                "bank-process_transactions-duplicate_signature",
+                error_counters.duplicate_signature
+            );
+        }
+        if 0 != error_counters.insufficient_funds {
+            inc_new_counter_info!(
+                "bank-process_transactions-insufficient_funds",
+                error_counters.duplicate_signature
             );
         }
         executed
