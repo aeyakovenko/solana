@@ -7,8 +7,7 @@ use entry::Entry;
 use std::io::{self, BufRead, Error, ErrorKind, Write};
 use std::mem::size_of;
 
-pub struct EntryWriter {
-}
+pub struct EntryWriter {}
 
 impl EntryWriter {
     fn write_entry<W: Write>(writer: &mut W, entry: &Entry) -> io::Result<()> {

@@ -376,7 +376,6 @@ impl Bank {
                 //return Err(BankError::LastIdNotFound);
             }
 
-
             // There is no way to predict what contract will execute without an error
             // If a fee can pay for execution then the contract will be scheduled
             let err =
@@ -775,7 +774,7 @@ impl Bank {
                 "bank-process_transactions-reserve_last_id",
                 error_counters.reserve_last_id
             );
-        } 
+        }
         executed
     }
 
