@@ -1109,28 +1109,11 @@ mod tests {
         let key1 = Keypair::new().pubkey();
         let key2 = Keypair::new().pubkey();
         let bank = Bank::new(&mint);
-
-        let spend = SystemProgram::Move { tokens: 1 };
-        let instructions = vec![
-            Instruction {
-                program_ids_index: 0,
-                userdata: serialize(&spend).unwrap(),
-                accounts: vec![0, 1],
-            },
-            Instruction {
-                program_ids_index: 0,
-                userdata: serialize(&spend).unwrap(),
-                accounts: vec![0, 2],
-            },
-        ];
-
-        let t1 = Transaction::new_with_instructions(
+        let t1 = Transaction::system_move_many(
             &mint.keypair(),
-            &[key1, key2],
+            &[(key1, 1), (key2, 1)],
             mint.last_id(),
             0,
-            vec![SystemProgram::id()],
-            instructions,
         );
         let res = bank.process_transactions(&vec![t1.clone()]);
         assert_eq!(res.len(), 1);

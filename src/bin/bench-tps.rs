@@ -2,6 +2,7 @@ extern crate bincode;
 #[macro_use]
 extern crate clap;
 extern crate influx_db_client;
+extern crate rand;
 extern crate rayon;
 extern crate serde_json;
 #[macro_use]
@@ -9,6 +10,7 @@ extern crate solana;
 
 use clap::{App, Arg};
 use influx_db_client as influxdb;
+use rand::{thread_rng, Rng};
 use rayon::prelude::*;
 use solana::client::mk_client;
 use solana::crdt::{Crdt, NodeInfo};
@@ -201,10 +203,11 @@ fn generate_txs(
     let bsps = (tx_count) as f64 / ns as f64;
     let nsps = ns as f64 / (tx_count) as f64;
     println!(
-        "Done. {:.2} thousand signatures per second, {:.2} us per signature, {} ms total time",
+        "Done. {:.2} thousand signatures per second, {:.2} us per signature, {} ms total time, {}",
         bsps * 1_000_000_f64,
         nsps / 1_000_f64,
         duration_as_ms(&duration),
+        last_id,
     );
     metrics::submit(
         influxdb::Point::new("bench-tps")
@@ -274,28 +277,22 @@ fn do_tx_transfers(
     }
 }
 
-fn split_tokens(tokens: i64, per_unit: i64, max_units: usize) -> (usize, i64) {
-    let total_blocks = tokens / per_unit;
-    let max_keys_to_fund = cmp::min(total_blocks - 1, max_units as i64);
-    let blocks_per_unit = total_blocks / (max_keys_to_fund + 1);
-    (max_keys_to_fund as usize, blocks_per_unit * per_unit)
-}
+const MAX_SPENDS_PER_TX: usize = 5;
 
 fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], tokens: i64) {
-    let max_per_move = 5;
     let total = tokens * (dests.len() as i64 + 1);
     let mut funded: Vec<(&Keypair, i64)> = vec![(source, total)];
     let mut notfunded: Vec<&Keypair> = dests.iter().collect();
+
     println!("funding keys {}", dests.len());
     while !notfunded.is_empty() {
-        let last_id = client.get_last_id();
         let mut new_funded: Vec<(&Keypair, i64)> = vec![];
         let mut to_fund = vec![];
         println!("creating from... {}", funded.len());
         for f in &mut funded {
-            let max_units = cmp::min(notfunded.len(), max_per_move);
-            let (num, per_unit) = split_tokens(f.1, tokens, max_units);
-            let start = notfunded.len() - num;
+            let max_units = cmp::min(notfunded.len(), MAX_SPENDS_PER_TX);
+            let start = notfunded.len() - max_units;
+            let per_unit = f.1 / (max_units as i64);
             let moves: Vec<_> = notfunded[start..]
                 .iter()
                 .map(|k| (k.pubkey(), per_unit))
@@ -307,25 +304,44 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
             if !moves.is_empty() {
                 to_fund.push((f.0, moves));
             }
-            f.1 -= per_unit * (num as i64);
-            assert!(f.1 >= per_unit);
         }
         println!("generating... {}", to_fund.len());
-        let to_fund_txs: Vec<_> = to_fund
-            .par_iter()
-            .map(|(k, m)| Transaction::system_move_many(k, &m, last_id, 0))
-            .collect();
-        println!("transfering... {}", to_fund.len());
-        to_fund_txs.iter().for_each(|tx| {
-            let _ = client.transfer_signed(&tx).expect("transfer");
+        // try to transfer a few at a time with recent last_id
+        to_fund.chunks(10_000).for_each(|chunk| {
+            loop {
+                let last_id = client.get_last_id();
+                let mut to_fund_txs: Vec<_> = chunk
+                    .par_iter()
+                    .map(|(k, m)| Transaction::system_move_many(k, &m, last_id, 0))
+                    .collect();
+                // with randomly distributed the failures
+                // most of the account pairs should have some funding in one of the pairs
+                // durring generate_tx step
+                thread_rng().shuffle(&mut to_fund_txs);
+                println!("transfering... {}", chunk.len());
+                to_fund_txs.iter().for_each(|tx| {
+                    let _ = client.transfer_signed(&tx).expect("transfer");
+                });
+                thread_rng().shuffle(&mut to_fund_txs);
+                let mut done = true;
+                let max = cmp::min(10, to_fund_txs.len());
+                for tx in &to_fund_txs[..max] {
+                    if client.poll_for_signature(&tx.signature).is_err() {
+                        println!("no signature");
+                        done = false;
+                    }
+                    if client.get_balance(&tx.account_keys[1]).unwrap_or(0) == 0 {
+                        println!("no balance");
+                        done = false;
+                    }
+                }
+                if done {
+                    break;
+                }
+            }
         });
-        println!(
-            "funded {} total: {} left: {}",
-            new_funded.len(),
-            funded.len() + new_funded.len(),
-            notfunded.len()
-        );
-        funded.append(&mut new_funded);
+        println!("funded: {} left: {}", new_funded.len(), notfunded.len());
+        funded = new_funded;
     }
 }
 
@@ -600,7 +616,13 @@ fn main() {
     let mut rnd = GenKeys::new(seed);
 
     println!("Creating {} keypairs...", tx_count * 2);
-    let keypairs = rnd.gen_n_keypairs(tx_count * 2);
+    let mut total_keys = 0;
+    let mut target = tx_count * 2;
+    while target > 0 {
+        total_keys += target;
+        target = target / MAX_SPENDS_PER_TX;
+    }
+    let gen_keypairs = rnd.gen_n_keypairs(total_keys as i64);
     let barrier_id = rnd.gen_n_keypairs(1).pop().unwrap();
 
     println!("Get tokens...");
@@ -608,13 +630,19 @@ fn main() {
 
     // Sample the first keypair, see if it has tokens, if so then resume
     // to avoid token loss
-    let keypair0_balance = client.poll_get_balance(&keypairs[0].pubkey()).unwrap_or(0);
+    let keypair0_balance = client
+        .poll_get_balance(&gen_keypairs.last().unwrap().pubkey())
+        .unwrap_or(0);
 
     if num_tokens_per_account > keypair0_balance {
-        let extra = (num_tokens_per_account - keypair0_balance) * (keypairs.len() as i64);
-        airdrop_tokens(&mut client, &leader, &id, extra);
-        fund_keys(&mut client, &id, &keypairs, num_tokens_per_account);
+        let extra = num_tokens_per_account - keypair0_balance;
+        let total = extra * (gen_keypairs.len() as i64);
+        airdrop_tokens(&mut client, &leader, &id, total);
+        println!("adding more tokens {}", extra);
+        fund_keys(&mut client, &id, &gen_keypairs, extra);
     }
+    let start = gen_keypairs.len() - (tx_count * 2) as usize;
+    let keypairs = &gen_keypairs[start..];
     airdrop_tokens(&mut barrier_client, &leader, &barrier_id, 1);
 
     println!("Get last ID...");
@@ -788,16 +816,6 @@ fn converge(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn test_split_tokens() {
-        assert_eq!(split_tokens(3, 2, 5), (0, 2));
-        assert_eq!(split_tokens(4, 2, 5), (1, 2));
-        assert_eq!(split_tokens(5, 2, 5), (1, 2));
-        assert_eq!(split_tokens(6, 2, 5), (2, 2));
-        assert_eq!(split_tokens(20, 2, 5), (5, 2));
-        assert_eq!(split_tokens(30, 2, 5), (5, 4));
-    }
-
     #[test]
     fn test_switch_directions() {
         assert_eq!(should_switch_directions(20, 0), false);
