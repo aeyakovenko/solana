@@ -18,6 +18,7 @@ use solana::client::mk_client;
 use solana::crdt::{Crdt, NodeInfo};
 use solana::drone::DRONE_PORT;
 use solana::hash::Hash;
+use solana::timing::timestamp;
 use solana::logger;
 use solana::metrics;
 use solana::ncp::Ncp;
@@ -178,7 +179,7 @@ fn send_barrier_transaction(barrier_client: &mut ThinClient, last_id: &mut Hash,
 }
 
 fn generate_txs(
-    shared_txs: &Arc<RwLock<VecDeque<Vec<Transaction>>>>,
+    shared_txs: &Arc<RwLock<VecDeque<Vec<(Transaction, u64)>>>>,
     source: &[Keypair],
     dest: &[Keypair],
     threads: usize,
@@ -197,9 +198,9 @@ fn generate_txs(
         .par_iter()
         .map(|(id, keypair)| {
             if !reclaim {
-                Transaction::system_new(id, keypair.pubkey(), 1, last_id)
+                (Transaction::system_new(id, keypair.pubkey(), 1, last_id), timestamp())
             } else {
-                Transaction::system_new(keypair, id.pubkey(), 1, last_id)
+                (Transaction::system_new(keypair, id.pubkey(), 1, last_id), timestamp())
             }
         }).collect();
 
@@ -235,7 +236,7 @@ fn generate_txs(
 
 fn do_tx_transfers(
     exit_signal: &Arc<AtomicBool>,
-    shared_txs: &Arc<RwLock<VecDeque<Vec<Transaction>>>>,
+    shared_txs: &Arc<RwLock<VecDeque<Vec<(Transaction, u64)>>>>,
     leader: &NodeInfo,
     shared_tx_thread_count: &Arc<AtomicIsize>,
     total_tx_sent_count: &Arc<AtomicUsize>,
@@ -257,7 +258,11 @@ fn do_tx_transfers(
             let tx_len = txs0.len();
             let transfer_start = Instant::now();
             for tx in txs0 {
-                client.transfer_signed(&tx).unwrap();
+                let now = timestamp();
+                if now > tx.1 && now - tx.1 > 1000*30 {
+                    continue;
+                }
+                client.transfer_signed(&tx.0).unwrap();
             }
             shared_tx_thread_count.fetch_add(-1, Ordering::Relaxed);
             total_tx_sent_count.fetch_add(tx_len, Ordering::Relaxed);
@@ -687,7 +692,7 @@ fn main() {
                 }).unwrap()
         }).collect();
 
-    let shared_txs: Arc<RwLock<VecDeque<Vec<Transaction>>>> =
+    let shared_txs: Arc<RwLock<VecDeque<Vec<(Transaction, u64)>>>> =
         Arc::new(RwLock::new(VecDeque::new()));
 
     let shared_tx_active_thread_count = Arc::new(AtomicIsize::new(0));
