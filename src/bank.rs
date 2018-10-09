@@ -733,12 +733,12 @@ impl Bank {
         self.update_transaction_statuses(txs, &executed);
         let mut tx_count = 0;
         let mut err_count = 0;
-        for r in &executed {
+        for (r,tx) in executed.iter().zip(txs.iter()) {
             if r.is_ok() {
                 tx_count += 1;
             } else {
                 if err_count == 0 {
-                    info!("tx error: {:?}", r);
+                    info!("tx error: {:?} {:?}", r, tx);
                 }
                 err_count += 1;
             }
