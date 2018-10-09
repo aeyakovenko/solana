@@ -757,26 +757,26 @@ impl Bank {
         inc_new_counter_info!("bank-process_transactions-txs", tx_count);
         if 0 != error_counters.old_last_id {
             inc_new_counter_info!(
-                "bank-process_transactions-old_last_id",
+                "bank-process_transactions-error-old_last_id",
                 error_counters.old_last_id
             );
         }
         if 0 != error_counters.reserve_last_id {
             inc_new_counter_info!(
-                "bank-process_transactions-reserve_last_id",
+                "bank-process_transactions-error-reserve_last_id",
                 error_counters.reserve_last_id
             );
         }
         if 0 != error_counters.duplicate_signature {
             inc_new_counter_info!(
-                "bank-process_transactions-duplicate_signature",
+                "bank-process_transactions-error-duplicate_signature",
                 error_counters.duplicate_signature
             );
         }
         if 0 != error_counters.insufficient_funds {
             inc_new_counter_info!(
-                "bank-process_transactions-insufficient_funds",
-                error_counters.duplicate_signature
+                "bank-process_transactions-error-insufficient_funds",
+                error_counters.insufficient_funds
             );
         }
         executed

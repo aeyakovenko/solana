@@ -310,7 +310,7 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
         to_fund.chunks(10_000).for_each(|chunk| {
             loop {
                 let last_id = client.get_last_id();
-                println!("generating... {}", chunk.len());
+                println!("generating... {} {}", chunk.len(), last_id);
                 let mut to_fund_txs: Vec<_> = chunk
                     .par_iter()
                     .map(|(k, m)| Transaction::system_move_many(k, &m, last_id, 0))
@@ -333,8 +333,8 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
                         break;
                     }
                     for a in &tx.account_keys[1..] {
-                        if client.get_balance(a).unwrap_or(0) == 0 {
-                            println!("no balance {}", a);
+                        if client.poll_get_balance(a).unwrap_or(0) == 0 {
+                            println!("no balance {} source bal: {}", a, client.poll_get_balance(&tx.account_keys[0]).unwrap_or(0));
                             done = false;
                             break;
                         }
