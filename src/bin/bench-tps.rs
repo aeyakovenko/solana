@@ -179,10 +179,12 @@ fn generate_txs(
     shared_txs: &Arc<RwLock<VecDeque<Vec<Transaction>>>>,
     source: &[Keypair],
     dest: &[Keypair],
-    last_id: &Hash,
     threads: usize,
     reclaim: bool,
+    leader: &NodeInfo,
 ) {
+    let mut client = mk_client(leader);
+    let last_id = client.get_last_id();
     let tx_count = source.len();
     println!("Signing transactions... {} (reclaim={})", tx_count, reclaim);
     let signing_start = Instant::now();
@@ -192,9 +194,9 @@ fn generate_txs(
         .par_iter()
         .map(|(id, keypair)| {
             if !reclaim {
-                Transaction::system_new(id, keypair.pubkey(), 1, *last_id)
+                Transaction::system_new(id, keypair.pubkey(), 1, last_id)
             } else {
-                Transaction::system_new(keypair, id.pubkey(), 1, *last_id)
+                Transaction::system_new(keypair, id.pubkey(), 1, last_id)
             }
         }).collect();
 
@@ -291,6 +293,9 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
         println!("creating from... {}", funded.len());
         for f in &mut funded {
             let max_units = cmp::min(notfunded.len(), MAX_SPENDS_PER_TX);
+            if max_units == 0 {
+                break;
+            }
             let start = notfunded.len() - max_units;
             let per_unit = f.1 / (max_units as i64);
             let moves: Vec<_> = notfunded[start..]
@@ -716,9 +721,9 @@ fn main() {
             &shared_txs,
             &keypairs[..len],
             &keypairs[len..],
-            &last_id,
             threads,
             reclaim_tokens_back_to_source_account,
+            &leader, 
         );
         // In sustained mode overlap the transfers with generation
         // this has higher average performance but lower peak performance
