@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(tx.account_keys[1], t1.pubkey());
         assert_eq!(tx.account_keys[2], t2.pubkey());
         assert_eq!(tx.instructions.len(), 2);
-        assert_eq!(tx.instructions[0].accounts, vec![0,1]);
-        assert_eq!(tx.instructions[1].accounts, vec![0,2]);
+        assert_eq!(tx.instructions[0].accounts, vec![0, 1]);
+        assert_eq!(tx.instructions[1].accounts, vec![0, 2]);
     }
 }

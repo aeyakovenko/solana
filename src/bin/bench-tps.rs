@@ -305,11 +305,12 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
                 to_fund.push((f.0, moves));
             }
         }
-        println!("generating... {}", to_fund.len());
+        println!("sending... {}", to_fund.len());
         // try to transfer a few at a time with recent last_id
         to_fund.chunks(10_000).for_each(|chunk| {
             loop {
                 let last_id = client.get_last_id();
+                println!("generating... {}", chunk.len());
                 let mut to_fund_txs: Vec<_> = chunk
                     .par_iter()
                     .map(|(k, m)| Transaction::system_move_many(k, &m, last_id, 0))
@@ -329,10 +330,14 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
                     if client.poll_for_signature(&tx.signature).is_err() {
                         println!("no signature");
                         done = false;
+                        break;
                     }
-                    if client.get_balance(&tx.account_keys[1]).unwrap_or(0) == 0 {
-                        println!("no balance");
-                        done = false;
+                    for a in &tx.account_keys[1..] {
+                        if client.get_balance(a).unwrap_or(0) == 0 {
+                            println!("no balance {}", a);
+                            done = false;
+                            break;
+                        }
                     }
                 }
                 if done {
