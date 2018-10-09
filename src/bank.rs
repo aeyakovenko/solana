@@ -101,8 +101,7 @@ type SignatureStatusMap = HashMap<Signature, Result<()>>;
 
 #[derive(Default)]
 struct ErrorCounters {
-    account_not_found_validator: usize,
-    account_not_found_leader: usize,
+    account_not_found: usize,
     account_in_use: usize,
     old_last_id: usize,
     reserve_last_id: usize,
@@ -364,11 +363,7 @@ impl Bank {
     ) -> Result<Vec<Account>> {
         // Copy all the accounts
         if accounts.get(&tx.account_keys[0]).is_none() {
-            if !self.is_leader {
-                error_counters.account_not_found_validator += 1;
-            } else {
-                error_counters.account_not_found_leader += 1;
-            }
+            error_counters.account_not_found += 1;
             Err(BankError::AccountNotFound)
         } else if accounts.get(&tx.account_keys[0]).unwrap().tokens < tx.fee {
             error_counters.insufficient_funds += 1;
@@ -750,19 +745,10 @@ impl Bank {
         }
         if err_count > 0 {
             info!("{} errors of {} txs", err_count, err_count + tx_count);
-            if !self.is_leader {
-                inc_new_counter_info!("bank-process_transactions_err-validator", err_count);
-                inc_new_counter_info!(
-                    "bank-appy_debits-account_not_found-validator",
-                    error_counters.account_not_found_validator
-                );
-            } else {
-                inc_new_counter_info!("bank-process_transactions_err-leader", err_count);
-                inc_new_counter_info!(
-                    "bank-appy_debits-account_not_found-leader",
-                    error_counters.account_not_found_leader
-                );
-            }
+            inc_new_counter_info!(
+                "bank-process_transactions-account_not_found",
+                error_counters.account_not_found
+            );
             inc_new_counter_info!("bank-process_transactions-error_count", err_count);
         }
 
