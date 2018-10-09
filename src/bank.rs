@@ -738,8 +738,7 @@ impl Bank {
                 tx_count += 1;
             } else {
                 if err_count == 0 {
-                    let age = Self::check_last_id_age(&self.last_ids.read().unwrap(), tx.last_id);
-                    info!("tx error: {:?} {} {:?}", r, age, tx);
+                    info!("tx error: {:?} {:?}", r, tx);
                 }
                 err_count += 1;
             }
