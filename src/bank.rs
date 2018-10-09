@@ -42,7 +42,7 @@ use window::WINDOW_SIZE;
 /// lengthens the time a client must wait to be certain a missing transaction will
 /// not be processed by the network.
 pub const NUM_TICKS_PER_SECOND: usize = 10;
-pub const MAX_ENTRY_IDS: usize = NUM_TICKS_PER_SECOND * 60;
+pub const MAX_ENTRY_IDS: usize = NUM_TICKS_PER_SECOND * 120;
 
 pub const VERIFY_BLOCK_SIZE: usize = 16;
 
@@ -733,12 +733,13 @@ impl Bank {
         self.update_transaction_statuses(txs, &executed);
         let mut tx_count = 0;
         let mut err_count = 0;
-        for (r,tx) in executed.iter().zip(txs.iter()) {
+        for (r, tx) in executed.iter().zip(txs.iter()) {
             if r.is_ok() {
                 tx_count += 1;
             } else {
                 if err_count == 0 {
-                    info!("tx error: {:?} {:?}", r, tx);
+                    let age = Self::check_last_id_age(&self.last_ids.read().unwrap(), tx.last_id);
+                    info!("tx error: {:?} {} {:?}", r, age, tx);
                 }
                 err_count += 1;
             }

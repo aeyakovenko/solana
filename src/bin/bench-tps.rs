@@ -4,6 +4,8 @@ extern crate clap;
 extern crate influx_db_client;
 extern crate rand;
 extern crate rayon;
+#[macro_use]
+extern crate log;
 extern crate serde_json;
 #[macro_use]
 extern crate solana;
@@ -185,6 +187,7 @@ fn generate_txs(
 ) {
     let mut client = mk_client(leader);
     let last_id = client.get_last_id();
+    info!("last_id: {} {:?}", last_id, Instant::now());
     let tx_count = source.len();
     println!("Signing transactions... {} (reclaim={})", tx_count, reclaim);
     let signing_start = Instant::now();
@@ -339,7 +342,12 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
                     }
                     for a in &tx.account_keys[1..] {
                         if client.poll_get_balance(a).unwrap_or(0) == 0 {
-                            println!("no balance {} source bal: {} {:?}", a, client.poll_get_balance(&tx.account_keys[0]).unwrap_or(0), tx);
+                            println!(
+                                "no balance {} source bal: {} {:?}",
+                                a,
+                                client.poll_get_balance(&tx.account_keys[0]).unwrap_or(0),
+                                tx
+                            );
                             done = false;
                             break;
                         }
@@ -723,7 +731,7 @@ fn main() {
             &keypairs[len..],
             threads,
             reclaim_tokens_back_to_source_account,
-            &leader, 
+            &leader,
         );
         // In sustained mode overlap the transfers with generation
         // this has higher average performance but lower peak performance
