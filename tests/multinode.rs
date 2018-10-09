@@ -687,6 +687,7 @@ fn test_multi_node_dynamic_network() {
                 }).unwrap()
         }).collect();
 
+
     let mut validators: Vec<_> = t2.into_iter().map(|t| t.join().unwrap()).collect();
 
     let mut client = mk_client(&leader_data);
@@ -695,6 +696,38 @@ fn test_multi_node_dynamic_network() {
     let start = Instant::now();
     let mut consecutive_success = 0;
     let mut expected_balance = leader_balance;
+
+    let leader = leader_data.clone();
+    let _ = Builder::new()
+        .name("attacker".to_string())
+        .spawn(move || {
+            println!("connecting to {:?}", leader);
+            let (_ncp, spy_node, _) = make_spy_node(&leader);
+            loop {
+                let mut vals: Vec<NodeInfo> = {
+                    let node = spy_node.read().unwrap();
+                    node.table.values().cloned().collect()
+                };
+                if vals.len() < num_nodes {
+                    sleep(Duration::from_millis(100));
+                    //wait for the network to be there
+                    continue;
+                }
+                let mut node = spy_node.write().unwrap();
+                for v in vals.iter_mut() {
+                    if v.id == node.my_data().id {
+                        continue;
+                    }
+                    v.version += 1;
+                    // uncomment to attack!
+                    // println!("hijacking {}", v.id);
+                    // v.contact_info.tvu = "127.0.0.1:1234".parse().unwrap();
+                    node.insert(&v);
+                }
+                break;
+            }
+        }).unwrap();
+ 
     for i in 0..std::cmp::max(20, num_nodes) {
         trace!("getting leader last_id");
         let last_id = client.get_last_id();
