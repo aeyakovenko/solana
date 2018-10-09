@@ -280,7 +280,7 @@ fn do_tx_transfers(
 const MAX_SPENDS_PER_TX: usize = 5;
 
 fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], tokens: i64) {
-    let total = tokens * (dests.len() as i64 + 1);
+    let total = tokens * dests.len() as i64;
     let mut funded: Vec<(&Keypair, i64)> = vec![(source, total)];
     let mut notfunded: Vec<&Keypair> = dests.iter().collect();
 
@@ -334,7 +334,7 @@ fn fund_keys(client: &mut ThinClient, source: &Keypair, dests: &[Keypair], token
                     }
                     for a in &tx.account_keys[1..] {
                         if client.poll_get_balance(a).unwrap_or(0) == 0 {
-                            println!("no balance {} source bal: {}", a, client.poll_get_balance(&tx.account_keys[0]).unwrap_or(0));
+                            println!("no balance {} source bal: {} {:?}", a, client.poll_get_balance(&tx.account_keys[0]).unwrap_or(0), tx);
                             done = false;
                             break;
                         }

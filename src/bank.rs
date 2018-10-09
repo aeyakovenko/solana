@@ -738,7 +738,7 @@ impl Bank {
                 tx_count += 1;
             } else {
                 if err_count == 0 {
-                    debug!("tx error: {:?}", r);
+                    info!("tx error: {:?}", r);
                 }
                 err_count += 1;
             }
