@@ -372,7 +372,7 @@ impl Bank {
             let age = Self::check_last_id_age(last_ids, tx.last_id);
             if age > max_age {
                 error_counters.old_last_id += 1;
-                //return Err(BankError::LastIdNotFound);
+                return Err(BankError::LastIdNotFound);
             }
 
             // There is no way to predict what contract will execute without an error
