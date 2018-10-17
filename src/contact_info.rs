@@ -1,0 +1,188 @@
+use signature::{Keypair, KeypairUtil};
+use solana_program_interface::pubkey::Pubkey;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+/// Structure representing a node on the network
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ContactInfo {
+    pub id: Pubkey,
+    /// gossip address
+    pub ncp: SocketAddr,
+    /// address to connect to for replication
+    pub tvu: SocketAddr,
+    /// address to connect to when this node is leader
+    pub rpu: SocketAddr,
+    /// transactions address
+    pub tpu: SocketAddr,
+    /// storage data address
+    pub storage_addr: SocketAddr,
+    /// latest wallclock picked
+    pub wallclock: u64,
+}
+
+#[macro_export]
+macro_rules! socketaddr {
+    ($ip:expr, $port:expr) => {
+        SocketAddr::from((Ipv4Addr::from($ip), $port))
+    };
+    ($str:expr) => {{
+        let a: SocketAddr = $str.parse().unwrap();
+        a
+    }};
+}
+#[macro_export]
+macro_rules! socketaddr_any {
+    () => {
+        socketaddr!(0, 0)
+    };
+}
+
+impl Default for ContactInfo {
+    fn default() -> Self {
+        ContactInfo {
+            id: Pubkey::default(),
+            ncp: socketaddr_any!(),
+            tvu: socketaddr_any!(),
+            rpu: socketaddr_any!(),
+            tpu: socketaddr_any!(),
+            storage_addr: socketaddr_any!(),
+            wallclock: 0,
+        }
+    }
+}
+
+impl ContactInfo {
+    pub fn new(
+        id: Pubkey,
+        ncp: SocketAddr,
+        tvu: SocketAddr,
+        rpu: SocketAddr,
+        tpu: SocketAddr,
+        storage_addr: SocketAddr,
+    ) -> Self {
+        ContactInfo {
+            id,
+            ncp,
+            tvu,
+            rpu,
+            tpu,
+            storage_addr,
+            wallclock: 0,
+        }
+    }
+
+    pub fn new_localhost(id: Pubkey) -> Self {
+        Self::new(
+            id,
+            socketaddr!("127.0.0.1:1234"),
+            socketaddr!("127.0.0.1:1235"),
+            socketaddr!("127.0.0.1:1236"),
+            socketaddr!("127.0.0.1:1237"),
+            socketaddr!("127.0.0.1:1238"),
+        )
+    }
+
+    #[cfg(test)]
+    /// ContactInfo with multicast addresses for adversarial testing.
+    pub fn new_multicast() -> Self {
+        let addr = socketaddr!("224.0.1.255:1000");
+        assert!(addr.ip().is_multicast());
+        Self::new(Keypair::new().pubkey(), addr, addr, addr, addr, addr)
+    }
+    fn next_port(addr: &SocketAddr, nxt: u16) -> SocketAddr {
+        let mut nxt_addr = *addr;
+        nxt_addr.set_port(addr.port() + nxt);
+        nxt_addr
+    }
+    pub fn new_with_pubkey_socketaddr(pubkey: Pubkey, bind_addr: &SocketAddr) -> Self {
+        let transactions_addr = *bind_addr;
+        let gossip_addr = Self::next_port(&bind_addr, 1);
+        let replicate_addr = Self::next_port(&bind_addr, 2);
+        let requests_addr = Self::next_port(&bind_addr, 3);
+        ContactInfo::new(
+            pubkey,
+            gossip_addr,
+            replicate_addr,
+            requests_addr,
+            transactions_addr,
+            "0.0.0.0:0".parse().unwrap(),
+        )
+    }
+    pub fn new_with_socketaddr(bind_addr: &SocketAddr) -> Self {
+        let keypair = Keypair::new();
+        Self::new_with_pubkey_socketaddr(keypair.pubkey(), bind_addr)
+    }
+    //
+    pub fn new_entry_point(gossip_addr: &SocketAddr) -> Self {
+        let daddr: SocketAddr = socketaddr!("0.0.0.0:0");
+        ContactInfo::new(Pubkey::default(), *gossip_addr, daddr, daddr, daddr, daddr)
+    }
+    fn is_valid_ip(addr: IpAddr) -> bool {
+        !(addr.is_unspecified() || addr.is_multicast())
+        // || (addr.is_loopback() && !cfg_test))
+        // TODO: boot loopback in production networks
+    }
+    /// port must not be 0
+    /// ip must be specified and not mulitcast
+    /// loopback ip is only allowed in tests
+    pub fn is_valid_address(addr: &SocketAddr) -> bool {
+        (addr.port() != 0) && Self::is_valid_ip(addr.ip())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_address() {
+        assert!(cfg!(test));
+        let bad_address_port = socketaddr!("127.0.0.1:0");
+        assert!(!ContactInfo::is_valid_address(&bad_address_port));
+        let bad_address_unspecified = socketaddr!(0, 1234);
+        assert!(!ContactInfo::is_valid_address(&bad_address_unspecified));
+        let bad_address_multicast = socketaddr!([224, 254, 0, 0], 1234);
+        assert!(!ContactInfo::is_valid_address(&bad_address_multicast));
+        let loopback = socketaddr!("127.0.0.1:1234");
+        assert!(ContactInfo::is_valid_address(&loopback));
+        //        assert!(!ContactInfo::is_valid_ip_internal(loopback.ip(), false));
+    }
+    #[test]
+    fn test_default() {
+        let ci = ContactInfo::default();
+        assert!(ci.ncp.ip().is_unspecified());
+        assert!(ci.tvu.ip().is_unspecified());
+        assert!(ci.rpu.ip().is_unspecified());
+        assert!(ci.tpu.ip().is_unspecified());
+        assert!(ci.storage_addr.ip().is_unspecified());
+    }
+    #[test]
+    fn test_multicast() {
+        let ci = ContactInfo::new_multicast();
+        assert!(ci.ncp.ip().is_multicast());
+        assert!(ci.tvu.ip().is_multicast());
+        assert!(ci.rpu.ip().is_multicast());
+        assert!(ci.tpu.ip().is_multicast());
+        assert!(ci.storage_addr.ip().is_multicast());
+    }
+    #[test]
+    fn test_entry_point() {
+        let addr = socketaddr!("127.0.0.1:10");
+        let ci = ContactInfo::new_entry_point(&addr);
+        assert_eq!(ci.ncp, addr);
+        assert!(ci.tvu.ip().is_unspecified());
+        assert!(ci.rpu.ip().is_unspecified());
+        assert!(ci.tpu.ip().is_unspecified());
+        assert!(ci.storage_addr.ip().is_unspecified());
+    }
+    #[test]
+    fn test_socketaddr() {
+        let addr = socketaddr!("127.0.0.1:10");
+        let ci = ContactInfo::new_with_socketaddr(&addr);
+        assert_eq!(ci.tpu, addr);
+        assert_eq!(ci.ncp.port(), 11);
+        assert_eq!(ci.tvu.port(), 12);
+        assert_eq!(ci.rpu.port(), 13);
+        assert!(ci.storage_addr.ip().is_unspecified());
+    }
+}

@@ -13,6 +13,7 @@ pub mod bank;
 pub mod banking_stage;
 pub mod blob_fetch_stage;
 pub mod bpf_loader;
+pub mod bloom;
 pub mod broadcast_stage;
 pub mod budget;
 pub mod budget_instruction;
@@ -23,9 +24,16 @@ pub mod chacha;
 pub mod chacha_cuda;
 pub mod choose_gossip_peer_strategy;
 pub mod client;
+pub mod crds;
+pub mod crds_gossip;
+pub mod crds_gossip_error;
+pub mod crds_gossip_pull;
+pub mod crds_gossip_push;
+pub mod crds_value;
 #[macro_use]
-pub mod cluster_info;
+pub mod contact_info;
 pub mod budget_program;
+pub mod cluster_info;
 pub mod drone;
 pub mod entry;
 pub mod entry_writer;
@@ -86,6 +94,7 @@ pub mod window;
 pub mod window_service;
 extern crate bincode;
 extern crate bs58;
+extern crate bv;
 extern crate byteorder;
 extern crate bytes;
 extern crate chrono;
@@ -93,10 +102,12 @@ extern crate clap;
 extern crate dirs;
 extern crate elf;
 extern crate generic_array;
+<<<<<<< HEAD
 #[cfg(test)]
 #[cfg(any(feature = "chacha", feature = "cuda"))]
 #[macro_use]
 extern crate hex_literal;
+extern crate indexmap;
 extern crate ipnetwork;
 extern crate itertools;
 extern crate libc;

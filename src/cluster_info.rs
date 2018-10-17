@@ -46,23 +46,6 @@ const GOSSIP_PURGE_MILLIS: u64 = 15000;
 /// minimum membership table size before we start purging dead nodes
 const MIN_TABLE_SIZE: usize = 2;
 
-#[macro_export]
-macro_rules! socketaddr {
-    ($ip:expr, $port:expr) => {
-        SocketAddr::from((Ipv4Addr::from($ip), $port))
-    };
-    ($str:expr) => {{
-        let a: SocketAddr = $str.parse().unwrap();
-        a
-    }};
-}
-#[macro_export]
-macro_rules! socketaddr_any {
-    () => {
-        socketaddr!(0, 0)
-    };
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum ClusterInfoError {
     NoPeers,
