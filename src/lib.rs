@@ -30,6 +30,8 @@ pub mod crds_gossip_error;
 pub mod crds_gossip_pull;
 pub mod crds_gossip_push;
 pub mod crds_value;
+pub mod crds_traits;
+pub mod crds_traits_impls;
 #[macro_use]
 pub mod contact_info;
 pub mod budget_program;

@@ -46,7 +46,7 @@ impl CrdsGossipPull {
         crds: &Crds,
         self_id: Pubkey,
         now: u64,
-    ) -> Result<(Pubkey, Bloom, CrdsValue), CrdsGossipError> {
+    ) -> Result<(Pubkey, Bloom<Hash>, CrdsValue), CrdsGossipError> {
         let mut options: Vec<_> = crds
             .table
             .values()
@@ -88,7 +88,7 @@ impl CrdsGossipPull {
         &mut self,
         crds: &mut Crds,
         caller: CrdsValue,
-        mut filter: Bloom,
+        mut filter: Bloom<Hash>,
         now: u64,
     ) -> Vec<CrdsValue> {
         let rv = self.filter_crds_values(crds, &mut filter);
@@ -126,28 +126,27 @@ impl CrdsGossipPull {
         failed
     }
     /// build a filter of the current crds table
-    fn build_crds_filter(&self, crds: &Crds) -> Bloom {
+    fn build_crds_filter(&self, crds: &Crds) -> Bloom<Hash> {
         let num = crds.table.values().count() + self.purged_values.len();
         let mut bloom = Bloom::random(
             num,
-            Hash::default().as_ref().len() as u8,
             0.1,
             4 * 1024 * 8 - 1,
         );
         for v in crds.table.values() {
-            bloom.add(v.value_hash.as_ref());
+            bloom.add(&v.value_hash);
         }
         for (value_hash, _insert_timestamp) in &self.purged_values {
-            bloom.add(value_hash.as_ref());
+            bloom.add(value_hash);
         }
         bloom
     }
     /// filter values that fail the bloom filter up to max_bytes
-    fn filter_crds_values(&self, crds: &Crds, filter: &mut Bloom) -> Vec<CrdsValue> {
+    fn filter_crds_values(&self, crds: &Crds, filter: &mut Bloom<Hash>) -> Vec<CrdsValue> {
         let mut max_bytes = self.max_bytes as isize;
         let mut ret = vec![];
         for v in crds.table.values() {
-            if filter.contains(v.value_hash.as_ref()) {
+            if filter.contains(&v.value_hash) {
                 continue;
             }
             max_bytes -= serialized_size(&v.value).unwrap() as isize;
@@ -353,7 +352,7 @@ mod test {
             // assert that purged value is still in the set
             // chance of 30 consequtive false positives is 0.1^30
             let mut filter = node.build_crds_filter(&node_crds);
-            assert!(filter.contains(value_hash.as_ref()));
+            assert!(filter.contains(&value_hash));
         }
 
         // purge the value

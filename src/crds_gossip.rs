@@ -10,6 +10,7 @@ use crds_gossip_pull::CrdsGossipPull;
 use crds_gossip_push::CrdsGossipPush;
 use crds_value::CrdsValue;
 use solana_sdk::pubkey::Pubkey;
+use hash::Hash;
 
 pub struct CrdsGossip {
     pub crds: Crds,
@@ -80,7 +81,7 @@ impl CrdsGossip {
     pub fn new_pull_request(
         &self,
         now: u64,
-    ) -> Result<(Pubkey, Bloom, CrdsValue), CrdsGossipError> {
+    ) -> Result<(Pubkey, Bloom<Hash>, CrdsValue), CrdsGossipError> {
         self.pull.new_pull_request(&self.crds, self.id, now)
     }
 
@@ -95,7 +96,7 @@ impl CrdsGossip {
     pub fn process_pull_request(
         &mut self,
         caller: CrdsValue,
-        filter: Bloom,
+        filter: Bloom<Hash>,
         now: u64,
     ) -> Vec<CrdsValue> {
         self.pull

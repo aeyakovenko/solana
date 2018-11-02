@@ -28,7 +28,7 @@ pub struct CrdsGossipPush {
     /// max bytes per message
     pub max_bytes: usize,
     /// active set of validators for push
-    active_set: IndexMap<Pubkey, Bloom>,
+    active_set: IndexMap<Pubkey, Bloom<Pubkey>>,
     /// push message queue
     push_messages: HashMap<CrdsValueLabel, Hash>,
     pushed_once: HashMap<Hash, u64>,
@@ -104,7 +104,7 @@ impl CrdsGossipPush {
             let mut failed = false;
             for p in &peers {
                 let filter = self.active_set.get_mut(p);
-                failed |= filter.is_none() || filter.unwrap().contains(label.pubkey().as_ref());
+                failed |= filter.is_none() || filter.unwrap().contains(&label.pubkey());
             }
             if failed {
                 continue;
@@ -137,7 +137,7 @@ impl CrdsGossipPush {
     pub fn process_prune_msg(&mut self, peer: Pubkey, from: Pubkey) {
         self.active_set
             .get_mut(&peer)
-            .map(|p| p.add(&from.as_ref()));
+            .map(|p| p.add(&from));
     }
 
     /// refresh the push active set
@@ -163,8 +163,7 @@ impl CrdsGossipPush {
                 if k.pubkey() == self_id {
                     continue;
                 }
-                let keylen = Pubkey::default().as_ref().len() as u8;
-                let bloom = Bloom::random(network_size, keylen, 0.1, 1024 * 8 * 4);
+                let bloom = Bloom::random(network_size, 0.1, 1024 * 8 * 4);
                 self.active_set.insert(k.pubkey(), bloom);
             };
         }

@@ -2,47 +2,48 @@
 use bv::BitVec;
 use rand::{self, Rng};
 use std::cmp;
+use crds_traits::BloomHashIndex;
+use std::marker::PhantomData;
 
 #[derive(Default, Clone, Debug, PartialEq)]
-pub struct Bloom {
-    pub keys: Vec<u8>,
+pub struct Bloom<T: BloomHashIndex> {
+    pub keys: Vec<u64>,
     pub bits: BitVec<u8>,
+    _phantom: PhantomData<T>,
 }
 
-impl Bloom {
+
+impl<T: BloomHashIndex> Bloom<T> {
     /// create filter optimal for num size given the `false_rate`
     /// the keys are randomized for picking data out of a collision resistant hash of size
     /// `keysize` bytes
     /// https://hur.st/bloomfilter/
-    pub fn random(num: usize, keysize: u8, false_rate: f64, max_bits: usize) -> Self {
+    pub fn random(num: usize, false_rate: f64, max_bits: usize) -> Self {
         let min_num_bits = ((num as f64 * false_rate.log(2f64))
             / (1f64 / 2f64.powf(2f64.log(2f64))).log(2f64)).ceil()
             as usize;
         let num_bits = cmp::max(1, cmp::min(min_num_bits, max_bits));
         let num_keys = ((num_bits as f64 / num as f64) * 2f64.log(2f64)).round() as usize;
-        let mut keys: Vec<u8> = (0..(keysize - 4)).into_iter().map(|x| x as u8).collect();
+        let mut keys: Vec<u64> = (0..num_keys).into_iter().map(|x| x as u64).collect();
         rand::thread_rng().shuffle(&mut keys);
         keys.truncate(num_keys);
         let bits = BitVec::new_fill(false, num_bits as u64);
-        Bloom { keys, bits }
+        Bloom { keys, bits, _phantom: Default::default() }
     }
-    fn pos(&self, key: &[u8], k: usize) -> usize {
-        ((key[k] as usize) << 3
-            | (key[k + 1] as usize) << 2
-            | (key[k + 2] as usize) << 1
-            | (key[k]) as usize)
-            % (self.bits.len() as usize)
+    fn pos(&self, key: &T, k: u64) -> u64 {
+        key.hash(k) % self.bits.len()
+        
     }
-    pub fn add(&mut self, key: &[u8]) {
+    pub fn add(&mut self, key: &T) {
         for k in &self.keys {
-            let pos = self.pos(key, *k as usize);
-            self.bits.set(pos as u64, true);
+            let pos = self.pos(key, *k);
+            self.bits.set(pos, true);
         }
     }
-    pub fn contains(&mut self, key: &[u8]) -> bool {
+    pub fn contains(&mut self, key: &T) -> bool {
         for k in &self.keys {
-            let pos = self.pos(key, *k as usize);
-            if !self.bits.get(pos as u64) {
+            let pos = self.pos(key, *k);
+            if !self.bits.get(pos) {
                 return false;
             }
         }
@@ -58,32 +59,32 @@ mod test {
     #[test]
     fn test_bloom_filter() {
         //empty
-        let bloom = Bloom::random(0, 32, 0.1, 100);
+        let bloom: Bloom<Hash> = Bloom::random(0, 0.1, 100);
         assert_eq!(bloom.keys.len(), 0);
         assert_eq!(bloom.bits.len(), 1);
 
         //normal
-        let bloom = Bloom::random(10, 32, 0.1, 100);
+        let bloom: Bloom<Hash> = Bloom::random(10, 0.1, 100);
         assert_eq!(bloom.keys.len(), 3);
         assert_eq!(bloom.bits.len(), 34);
 
         //saturated
-        let bloom = Bloom::random(100, 32, 0.1, 100);
+        let bloom: Bloom<Hash> = Bloom::random(100, 0.1, 100);
         assert_eq!(bloom.keys.len(), 1);
         assert_eq!(bloom.bits.len(), 100);
     }
     #[test]
     fn test_add_contains() {
-        let mut bloom = Bloom::random(100, Hash::default().as_ref().len() as u8, 0.1, 100);
+        let mut bloom: Bloom<Hash> = Bloom::random(100, 0.1, 100);
 
         let key = hash(b"hello");
-        assert!(!bloom.contains(key.as_ref()));
-        bloom.add(key.as_ref());
-        assert!(bloom.contains(key.as_ref()));
+        assert!(!bloom.contains(&key));
+        bloom.add(&key);
+        assert!(bloom.contains(&key));
 
         let key = hash(b"world");
-        assert!(!bloom.contains(key.as_ref()));
-        bloom.add(key.as_ref());
-        assert!(bloom.contains(key.as_ref()));
+        assert!(!bloom.contains(&key));
+        bloom.add(&key);
+        assert!(bloom.contains(&key));
     }
 }
