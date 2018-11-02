@@ -9,7 +9,7 @@ use crds_gossip_error::CrdsGossipError;
 use crds_gossip_pull::CrdsGossipPull;
 use crds_gossip_push::CrdsGossipPush;
 use crds_value::CrdsValue;
-use solana_program_interface::pubkey::Pubkey;
+use solana_sdk::pubkey::Pubkey;
 
 pub struct CrdsGossip {
     pub crds: Crds,

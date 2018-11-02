@@ -17,7 +17,7 @@ use hash::Hash;
 use indexmap::map::IndexMap;
 use packet::BLOB_DATA_SIZE;
 use rand::{self, Rng};
-use solana_program_interface::pubkey::Pubkey;
+use solana_sdk::pubkey::Pubkey;
 use std::collections::HashMap;
 
 pub const CRDS_GOSSIP_NUM_ACTIVE: usize = 30;

@@ -1,5 +1,5 @@
 use signature::{Keypair, KeypairUtil};
-use solana_program_interface::pubkey::Pubkey;
+use solana_sdk::pubkey::Pubkey;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 /// Structure representing a node on the network

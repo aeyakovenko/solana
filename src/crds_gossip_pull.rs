@@ -16,7 +16,7 @@ use hash::Hash;
 use packet::BLOB_DATA_SIZE;
 use rand;
 use rand::distributions::{Distribution, Weighted, WeightedChoice};
-use solana_program_interface::pubkey::Pubkey;
+use solana_sdk::pubkey::Pubkey;
 use std::cmp;
 use std::collections::HashMap;
 use std::collections::VecDeque;

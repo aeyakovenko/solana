@@ -102,7 +102,6 @@ extern crate clap;
 extern crate dirs;
 extern crate elf;
 extern crate generic_array;
-<<<<<<< HEAD
 #[cfg(test)]
 #[cfg(any(feature = "chacha", feature = "cuda"))]
 #[macro_use]

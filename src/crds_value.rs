@@ -1,5 +1,5 @@
 use contact_info::ContactInfo;
-use solana_program_interface::pubkey::Pubkey;
+use solana_sdk::pubkey::Pubkey;
 use std::fmt;
 use transaction::Transaction;
 

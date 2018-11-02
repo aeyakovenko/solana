@@ -52,7 +52,7 @@ use bincode::{serialize, serialized_size};
 use crds_value::{CrdsValue, CrdsValueLabel};
 use hash::{hash, Hash};
 use indexmap::map::IndexMap;
-use solana_program_interface::pubkey::Pubkey;
+use solana_sdk::pubkey::Pubkey;
 use std::cmp;
 
 pub struct Crds {
