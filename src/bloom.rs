@@ -24,9 +24,7 @@ impl<T: BloomHashIndex> Bloom<T> {
             as usize;
         let num_bits = cmp::max(1, cmp::min(min_num_bits, max_bits));
         let num_keys = ((num_bits as f64 / num as f64) * 2f64.log(2f64)).round() as usize;
-        let mut keys: Vec<u64> = (0..num_keys).into_iter().map(|x| x as u64).collect();
-        rand::thread_rng().shuffle(&mut keys);
-        keys.truncate(num_keys);
+        let keys: Vec<u64> = (0..num_keys).into_iter().map(|_| rand::thread_rng().gen()).collect();
         let bits = BitVec::new_fill(false, num_bits as u64);
         Bloom { keys, bits, _phantom: Default::default() }
     }
