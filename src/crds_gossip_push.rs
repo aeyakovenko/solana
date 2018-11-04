@@ -3,9 +3,9 @@
 //! Eager push strategy is based on Plumtree
 //! http://asc.di.fct.unl.pt/~jleitao/pdf/srds07-leitao.pdf
 //!
-//! Main differences are
+//! Main differences are:
 //! 1. There is no `max hop`.  Messages are signed with a local wallclock.  If they are outside of
-//!    the local nodes wallclock window they are droped.
+//!    the local nodes wallclock window they are droped silently.
 //! 2. The prune set is stored in a Bloom filter.
 
 use bincode::serialized_size;

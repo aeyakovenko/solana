@@ -1,11 +1,13 @@
 //! Crds Gossip Pull overlay
-//! This module is used to synchronize the Crds with nodes in the network.
-//! The basic strategy is as follows
+//! This module implements the anti-entropy protocol for the newwork.
+//!
+//! The basic strategy is as follows:
 //! 1. Construct a bloom filter of the local data set
 //! 2. Randomly ask a node on the network for data that is is not contained in the bloom filter.
 //!
-//! Bloom filters have a false positive rate.  Because each filter is constructed with random hash
-//! functions each subsequent request will have a different distribution of false positivies.
+//! Bloom filters have a false positive rate.  Each requests uses a differnet bloom filter
+//! with random hash functions.  So each subsequent request will have a different distribution
+//! of false positivies.
 
 use bincode::serialized_size;
 use bloom::Bloom;

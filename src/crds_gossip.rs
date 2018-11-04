@@ -275,35 +275,38 @@ mod test {
                     }
                     node.lock().unwrap().new_push_messages(now)
                 }).collect();
-            let transfered: Vec<_> = requests.par_iter().map(|(from, peers, msgs)| {
-                let mut bytes: usize = 0;
-                let mut delivered: usize = 0;
-                let mut num_msgs: usize = 0;
-                let mut prunes: usize = 0;
-                for to in peers {
-                    bytes += serialized_size(msgs).unwrap() as usize;
-                    num_msgs += 1;
-                    for m in msgs {
-                        let origin = m.label().pubkey();
-                        let rsp = network
-                            .get(&to)
-                            .map(|node| node.lock().unwrap().process_push_message(m.clone(), now))
-                            .unwrap();
-                        if rsp == Err(CrdsGossipError::PushMessagePrune) {
-                            prunes += 1;
-                            bytes += serialized_size(&to).unwrap() as usize;
-                            bytes += serialized_size(&origin).unwrap() as usize;
-                            network
-                                .get(&from)
-                                .map(|node| node.lock().unwrap().process_prune_msg(*to, origin))
-                                .unwrap();
+            let transfered: Vec<_> = requests
+                .par_iter()
+                .map(|(from, peers, msgs)| {
+                    let mut bytes: usize = 0;
+                    let mut delivered: usize = 0;
+                    let mut num_msgs: usize = 0;
+                    let mut prunes: usize = 0;
+                    for to in peers {
+                        bytes += serialized_size(msgs).unwrap() as usize;
+                        num_msgs += 1;
+                        for m in msgs {
+                            let origin = m.label().pubkey();
+                            let rsp = network
+                                .get(&to)
+                                .map(|node| {
+                                    node.lock().unwrap().process_push_message(m.clone(), now)
+                                }).unwrap();
+                            if rsp == Err(CrdsGossipError::PushMessagePrune) {
+                                prunes += 1;
+                                bytes += serialized_size(&to).unwrap() as usize;
+                                bytes += serialized_size(&origin).unwrap() as usize;
+                                network
+                                    .get(&from)
+                                    .map(|node| node.lock().unwrap().process_prune_msg(*to, origin))
+                                    .unwrap();
+                            }
+                            delivered += rsp.is_ok() as usize;
                         }
-                        delivered += rsp.is_ok() as usize;
                     }
-                }
-                (bytes, delivered, num_msgs, prunes)
-            }).collect();
-            for (b,d,m,p) in transfered {
+                    (bytes, delivered, num_msgs, prunes)
+                }).collect();
+            for (b, d, m, p) in transfered {
                 bytes += b;
                 delivered += d;
                 num_msgs += m;
@@ -381,7 +384,7 @@ mod test {
                     });
                     (bytes, msgs, overhead)
                 }).collect();
-            for (b,m, o) in transfered {
+            for (b, m, o) in transfered {
                 bytes += b;
                 msgs += m;
                 overhead += o;
