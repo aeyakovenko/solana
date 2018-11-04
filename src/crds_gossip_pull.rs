@@ -128,11 +128,7 @@ impl CrdsGossipPull {
     /// build a filter of the current crds table
     fn build_crds_filter(&self, crds: &Crds) -> Bloom<Hash> {
         let num = crds.table.values().count() + self.purged_values.len();
-        let mut bloom = Bloom::random(
-            num,
-            0.1,
-            4 * 1024 * 8 - 1,
-        );
+        let mut bloom = Bloom::random(num, 0.1, 4 * 1024 * 8 - 1);
         for v in crds.table.values() {
             bloom.add(&v.value_hash);
         }

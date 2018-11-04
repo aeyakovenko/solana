@@ -1,8 +1,8 @@
 //! Simple Bloom Filter
 use bv::BitVec;
+use crds_traits::BloomHashIndex;
 use rand::{self, Rng};
 use std::cmp;
-use crds_traits::BloomHashIndex;
 use std::marker::PhantomData;
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -11,7 +11,6 @@ pub struct Bloom<T: BloomHashIndex> {
     pub bits: BitVec<u8>,
     _phantom: PhantomData<T>,
 }
-
 
 impl<T: BloomHashIndex> Bloom<T> {
     /// create filter optimal for num size given the `false_rate`
@@ -24,13 +23,19 @@ impl<T: BloomHashIndex> Bloom<T> {
             as usize;
         let num_bits = cmp::max(1, cmp::min(min_num_bits, max_bits));
         let num_keys = ((num_bits as f64 / num as f64) * 2f64.log(2f64)).round() as usize;
-        let keys: Vec<u64> = (0..num_keys).into_iter().map(|_| rand::thread_rng().gen()).collect();
+        let keys: Vec<u64> = (0..num_keys)
+            .into_iter()
+            .map(|_| rand::thread_rng().gen())
+            .collect();
         let bits = BitVec::new_fill(false, num_bits as u64);
-        Bloom { keys, bits, _phantom: Default::default() }
+        Bloom {
+            keys,
+            bits,
+            _phantom: Default::default(),
+        }
     }
     fn pos(&self, key: &T, k: u64) -> u64 {
         key.hash(k) % self.bits.len()
-        
     }
     pub fn add(&mut self, key: &T) {
         for k in &self.keys {
@@ -84,5 +89,13 @@ mod test {
         assert!(!bloom.contains(&key));
         bloom.add(&key);
         assert!(bloom.contains(&key));
+    }
+    #[test]
+    fn test_random() {
+        let mut b1: Bloom<Hash> = Bloom::random(10, 0.1, 100);
+        let mut b2: Bloom<Hash> = Bloom::random(10, 0.1, 100);
+        b1.keys.sort();
+        b2.keys.sort();
+        assert_ne!(b1.keys, b2.keys);
     }
 }

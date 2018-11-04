@@ -135,9 +135,7 @@ impl CrdsGossipPush {
 
     /// add the `from` to the peer's filter of nodes
     pub fn process_prune_msg(&mut self, peer: Pubkey, from: Pubkey) {
-        self.active_set
-            .get_mut(&peer)
-            .map(|p| p.add(&from));
+        self.active_set.get_mut(&peer).map(|p| p.add(&from));
     }
 
     /// refresh the push active set
