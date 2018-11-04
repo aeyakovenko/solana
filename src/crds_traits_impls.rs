@@ -1,4 +1,4 @@
-use crds_traits::BloomHashIndex;
+use bloom::BloomHashIndex;
 use hash::Hash;
 use solana_sdk::pubkey::Pubkey;
 

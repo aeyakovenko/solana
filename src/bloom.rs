@@ -1,9 +1,14 @@
 //! Simple Bloom Filter
 use bv::BitVec;
-use crds_traits::BloomHashIndex;
 use rand::{self, Rng};
 use std::cmp;
 use std::marker::PhantomData;
+
+/// Generate a stable hash of `self` for each `hash_index`
+/// Best effort can be made for uniqueness of each hash.
+pub trait BloomHashIndex {
+    fn hash(&self, hash_index: u64) -> u64;
+}
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct Bloom<T: BloomHashIndex> {
