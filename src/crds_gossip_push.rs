@@ -18,6 +18,7 @@ use indexmap::map::IndexMap;
 use packet::BLOB_DATA_SIZE;
 use rand::{self, Rng};
 use solana_sdk::pubkey::Pubkey;
+use std::cmp;
 use std::collections::HashMap;
 
 pub const CRDS_GOSSIP_NUM_ACTIVE: usize = 30;
@@ -138,6 +139,11 @@ impl CrdsGossipPush {
         self.active_set.get_mut(&peer).map(|p| p.add(&from));
     }
 
+    fn compute_need(num_active: usize, active_set_len: usize, ratio: usize) -> usize {
+        let num = active_set_len / ratio;
+        cmp::min(num_active, (num_active - active_set_len) + num)
+    }
+
     /// refresh the push active set
     /// * ratio - active_set.len()/ratio is the number of actives to rotate
     pub fn refresh_push_active_set(
@@ -147,23 +153,38 @@ impl CrdsGossipPush {
         network_size: usize,
         ratio: usize,
     ) {
+        let need = Self::compute_need(self.num_active, self.active_set.len(), ratio);
+        trace!("print {}", need);
+        let mut new_items = HashMap::new();
+        for _ in 0..crds.table.len() {
+            let item = crds
+                .table
+                .get_index(rand::thread_rng().gen_range(0, crds.table.len()));
+            if item.is_none() {
+                continue;
+            }
+            let val = item.unwrap();
+            if val.0.pubkey() == self_id {
+                continue;
+            }
+            if self.active_set.get(&val.0.pubkey()).is_some() {
+                continue;
+            }
+            if new_items.get(&val.0.pubkey()).is_some() {
+                continue;
+            }
+            let bloom = Bloom::random(network_size, 0.1, 1024 * 8 * 4);
+            new_items.insert(val.0.pubkey(), bloom);
+        }
+        trace!("print {}", new_items.len());
         let mut keys: Vec<Pubkey> = self.active_set.keys().cloned().collect();
         rand::thread_rng().shuffle(&mut keys);
         let num = keys.len() / ratio;
         for k in &keys[..num] {
             self.active_set.remove(k);
         }
-        let need = self.num_active - self.active_set.len();
-        for _ in 0..need {
-            let len = crds.table.len();
-            let item = crds.table.get_index(rand::thread_rng().gen_range(0, len));
-            if let Some((k, _)) = item {
-                if k.pubkey() == self_id {
-                    continue;
-                }
-                let bloom = Bloom::random(network_size, 0.1, 1024 * 8 * 4);
-                self.active_set.insert(k.pubkey(), bloom);
-            };
+        for (k, v) in new_items {
+            self.active_set.insert(k, v);
         }
     }
 
@@ -292,6 +313,13 @@ mod test {
                 .value,
             value_old
         );
+    }
+    #[test]
+    fn test_compute_need() {
+        assert_eq!(CrdsGossipPush::compute_need(30, 0, 10), 30);
+        assert_eq!(CrdsGossipPush::compute_need(30, 1, 10), 29);
+        assert_eq!(CrdsGossipPush::compute_need(30, 30, 10), 3);
+        assert_eq!(CrdsGossipPush::compute_need(30, 29, 10), 3);
     }
     #[test]
     fn test_refresh_active_set() {
