@@ -14,7 +14,7 @@ use solana_sdk::pubkey::Pubkey;
 
 pub struct CrdsGossip {
     pub crds: Crds,
-    id: Pubkey,
+    pub id: Pubkey,
     push: CrdsGossipPush,
     pull: CrdsGossipPull,
 }
@@ -35,17 +35,27 @@ impl CrdsGossip {
         self.id = id;
     }
     /// process a push message to the network
-    pub fn process_push_message(
-        &mut self,
-        value: CrdsValue,
-        now: u64,
-    ) -> Result<(), CrdsGossipError> {
-        let old = self.push.process_push_message(&mut self.crds, value, now)?;
-        old.map(|val| {
-            self.pull
-                .record_old_hash(val.value_hash, val.local_timestamp)
-        });
-        Ok(())
+    pub fn process_push_message(&mut self, values: &[CrdsValue], now: u64) -> Vec<Pubkey> {
+        let results: Vec<_> = values
+            .iter()
+            .map(|val| {
+                self.push
+                    .process_push_message(&mut self.crds, val.clone(), now)
+            }).collect();
+        results
+            .into_iter()
+            .zip(values)
+            .filter_map(|(r, d)| {
+                if r == Err(CrdsGossipError::PushMessagePrune) {
+                    Some(d.label().pubkey())
+                } else if let Ok(Some(val)) = r {
+                    self.pull
+                        .record_old_hash(val.value_hash, val.local_timestamp);
+                    None
+                } else {
+                    None
+                }
+            }).collect()
     }
 
     pub fn new_push_messages(&mut self, now: u64) -> (Pubkey, Vec<Pubkey>, Vec<CrdsValue>) {
@@ -54,8 +64,8 @@ impl CrdsGossip {
     }
 
     /// add the `from` to the peer's filter of nodes
-    pub fn process_prune_msg(&mut self, peer: Pubkey, from: Pubkey) {
-        self.push.process_prune_msg(peer, from)
+    pub fn process_prune_msg(&mut self, peer: Pubkey, origin: &[Pubkey]) {
+        self.push.process_prune_msg(peer, origin)
     }
 
     /// refresh the push active set
@@ -69,14 +79,6 @@ impl CrdsGossip {
         )
     }
 
-    /// purge old pending push messages
-    pub fn purge_old_pending_push_messages(&mut self, min_time: u64) {
-        self.push
-            .purge_old_pending_push_messages(&self.crds, min_time);
-    }
-    pub fn purge_old_pushed_once_messages(&mut self, min_time: u64) {
-        self.push.purge_old_pushed_once_messages(min_time);
-    }
     /// generate a random request
     pub fn new_pull_request(
         &self,
@@ -112,14 +114,23 @@ impl CrdsGossip {
         self.pull
             .process_pull_response(&mut self.crds, from, response, now)
     }
-    /// Purge values from the crds that are older then `active_timeout`
-    /// The value_hash of an active item is put into self.purged_values queue
-    pub fn purge_active(&mut self, min_ts: u64) {
-        self.pull.purge_active(&mut self.crds, self.id, min_ts)
-    }
-    /// Purge values from the `self.purged_values` queue that are older then purge_timeout
-    pub fn purge_purged(&mut self, min_ts: u64) {
-        self.pull.purge_purged(min_ts)
+    pub fn purge(&mut self, now: u64) {
+        if now > self.push.msg_timeout {
+            let min = now - self.push.msg_timeout;
+            self.push.purge_old_pending_push_messages(&self.crds, min);
+        }
+        if now > 5 * self.push.msg_timeout {
+            let min = now - 5 * self.push.msg_timeout;
+            self.push.purge_old_pushed_once_messages(min);
+        }
+        if now > self.pull.crds_timeout {
+            let min = now - self.pull.crds_timeout;
+            self.pull.purge_active(&mut self.crds, self.id, min);
+        }
+        if now > 5 * self.pull.crds_timeout {
+            let min = now - 5 * self.pull.crds_timeout;
+            self.pull.purge_purged(min);
+        }
     }
 }
 
@@ -138,11 +149,11 @@ mod test {
     type Node = Arc<Mutex<CrdsGossip>>;
     type Network = HashMap<Pubkey, Node>;
     fn star_network_create(num: usize) -> Network {
-        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         let mut network: HashMap<_, _> = (1..num)
             .map(|_| {
                 let new =
-                    CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+                    CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
                 let id = new.label().pubkey();
                 let mut node = CrdsGossip::default();
                 node.crds.insert(new.clone(), 0).unwrap();
@@ -158,11 +169,32 @@ mod test {
         network
     }
 
+    fn rstar_network_create(num: usize) -> Network {
+        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
+        let mut origin = CrdsGossip::default();
+        let id = entry.label().pubkey();
+        origin.crds.insert(entry.clone(), 0).unwrap();
+        origin.set_self(id);
+        let mut network: HashMap<_, _> = (1..num)
+            .map(|_| {
+                let new =
+                    CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
+                let id = new.label().pubkey();
+                let mut node = CrdsGossip::default();
+                node.crds.insert(new.clone(), 0).unwrap();
+                origin.crds.insert(new.clone(), 0).unwrap();
+                node.set_self(id);
+                (new.label().pubkey(), Arc::new(Mutex::new(node)))
+            }).collect();
+        network.insert(id, Arc::new(Mutex::new(origin)));
+        network
+    }
+
     fn ring_network_create(num: usize) -> Network {
         let mut network: HashMap<_, _> = (0..num)
             .map(|_| {
                 let new =
-                    CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+                    CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
                 let id = new.label().pubkey();
                 let mut node = CrdsGossip::default();
                 node.crds.insert(new.clone(), 0).unwrap();
@@ -221,11 +253,10 @@ mod test {
                 let mut m = node
                     .crds
                     .lookup(&CrdsValueLabel::ContactInfo(node.id))
-                    .and_then(|v| v.clone().contact_info())
+                    .and_then(|v| v.contact_info().cloned())
                     .unwrap();
                 m.wallclock = now;
-                node.process_push_message(CrdsValue::ContactInfo(m), now)
-                    .unwrap();
+                node.process_push_message(&[CrdsValue::ContactInfo(m.clone())], now);
             });
             // push for a bit
             let (queue_size, bytes_tx) = network_run_push(network, start, end);
@@ -265,14 +296,7 @@ mod test {
             let requests: Vec<_> = network_values
                 .par_iter()
                 .map(|node| {
-                    if now > CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS {
-                        node.lock().unwrap().purge_old_pending_push_messages(
-                            now - CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS as u64,
-                        );
-                        node.lock().unwrap().purge_old_pushed_once_messages(
-                            now - 2 * CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS as u64,
-                        );
-                    }
+                    node.lock().unwrap().purge(now);
                     node.lock().unwrap().new_push_messages(now)
                 }).collect();
             let transfered: Vec<_> = requests
@@ -285,24 +309,17 @@ mod test {
                     for to in peers {
                         bytes += serialized_size(msgs).unwrap() as usize;
                         num_msgs += 1;
-                        for m in msgs {
-                            let origin = m.label().pubkey();
-                            let rsp = network
-                                .get(&to)
-                                .map(|node| {
-                                    node.lock().unwrap().process_push_message(m.clone(), now)
-                                }).unwrap();
-                            if rsp == Err(CrdsGossipError::PushMessagePrune) {
-                                prunes += 1;
-                                bytes += serialized_size(&to).unwrap() as usize;
-                                bytes += serialized_size(&origin).unwrap() as usize;
-                                network
-                                    .get(&from)
-                                    .map(|node| node.lock().unwrap().process_prune_msg(*to, origin))
-                                    .unwrap();
-                            }
-                            delivered += rsp.is_ok() as usize;
-                        }
+                        let rsps = network
+                            .get(&to)
+                            .map(|node| node.lock().unwrap().process_push_message(&msgs, now))
+                            .unwrap();
+                        bytes += serialized_size(&rsps).unwrap() as usize;
+                        prunes += rsps.len();
+                        network
+                            .get(&from)
+                            .map(|node| node.lock().unwrap().process_prune_msg(*to, &rsps))
+                            .unwrap();
+                        delivered += rsps.is_empty() as usize;
                     }
                     (bytes, delivered, num_msgs, prunes)
                 }).collect();
@@ -423,15 +440,16 @@ mod test {
     }
     #[test]
     fn test_star_network_push_star_200() {
-        use logger;
-        logger::setup();
         let mut network = star_network_create(200);
         network_simulator(&mut network);
     }
     #[test]
+    fn test_star_network_push_rstar_200() {
+        let mut network = rstar_network_create(200);
+        network_simulator(&mut network);
+    }
+    #[test]
     fn test_star_network_push_ring_200() {
-        use logger;
-        logger::setup();
         let mut network = ring_network_create(200);
         network_simulator(&mut network);
     }
@@ -445,10 +463,18 @@ mod test {
     }
     #[test]
     #[ignore]
+    fn test_rstar_network_large_push() {
+        use logger;
+        logger::setup();
+        let mut network = rstar_network_create(4000);
+        network_simulator(&mut network);
+    }
+    #[test]
+    #[ignore]
     fn test_ring_network_large_push() {
         use logger;
         logger::setup();
-        let mut network = ring_network_create(4000);
+        let mut network = ring_network_create(4001);
         network_simulator(&mut network);
     }
     #[test]
@@ -456,7 +482,7 @@ mod test {
     fn test_star_network_large_push() {
         use logger;
         logger::setup();
-        let mut network = star_network_create(4000);
+        let mut network = star_network_create(4002);
         network_simulator(&mut network);
     }
 }

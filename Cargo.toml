@@ -70,7 +70,7 @@ unstable = []
 atty = "0.2"
 bincode = "1.0.0"
 bs58 = "0.2.0"
-bv = "0.10.0"
+bv = { version = "0.10.0", features = ["serde"] }
 byteorder = "1.2.1"
 bytes = "0.4"
 chrono = { version = "0.4.0", features = ["serde"] }

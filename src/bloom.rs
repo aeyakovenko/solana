@@ -10,7 +10,7 @@ pub trait BloomHashIndex {
     fn hash(&self, hash_index: u64) -> u64;
 }
 
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct Bloom<T: BloomHashIndex> {
     pub keys: Vec<u64>,
     pub bits: BitVec<u8>,

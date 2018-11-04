@@ -35,7 +35,7 @@ pub struct CrdsGossipPush {
     pushed_once: HashMap<Hash, u64>,
     pub num_active: usize,
     pub push_fanout: usize,
-    pub push_msg_timeout: u64,
+    pub msg_timeout: u64,
 }
 
 impl Default for CrdsGossipPush {
@@ -47,7 +47,7 @@ impl Default for CrdsGossipPush {
             pushed_once: HashMap::new(),
             num_active: CRDS_GOSSIP_NUM_ACTIVE,
             push_fanout: CRDS_GOSSIP_PUSH_FANOUT,
-            push_msg_timeout: CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS,
+            msg_timeout: CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS,
         }
     }
 }
@@ -62,10 +62,10 @@ impl CrdsGossipPush {
         value: CrdsValue,
         now: u64,
     ) -> Result<Option<VersionedCrdsValue>, CrdsGossipError> {
-        if now > value.wallclock() + self.push_msg_timeout {
+        if now > value.wallclock() + self.msg_timeout {
             return Err(CrdsGossipError::PushMessageTimeout);
         }
-        if now + self.push_msg_timeout < value.wallclock() {
+        if now + self.msg_timeout < value.wallclock() {
             return Err(CrdsGossipError::PushMessageTimeout);
         }
         let label = value.label();
@@ -119,7 +119,7 @@ impl CrdsGossipPush {
                 continue;
             }
             let value = &version.value;
-            if value.wallclock() > now || value.wallclock() + self.push_msg_timeout < now {
+            if value.wallclock() > now || value.wallclock() + self.msg_timeout < now {
                 continue;
             }
             total_bytes += serialized_size(value).unwrap() as usize;
@@ -135,8 +135,10 @@ impl CrdsGossipPush {
     }
 
     /// add the `from` to the peer's filter of nodes
-    pub fn process_prune_msg(&mut self, peer: Pubkey, from: Pubkey) {
-        self.active_set.get_mut(&peer).map(|p| p.add(&from));
+    pub fn process_prune_msg(&mut self, peer: Pubkey, origins: &[Pubkey]) {
+        for origin in origins {
+            self.active_set.get_mut(&peer).map(|p| p.add(origin));
+        }
     }
 
     fn compute_need(num_active: usize, active_set_len: usize, ratio: usize) -> usize {
@@ -234,7 +236,7 @@ mod test {
     fn test_process_push() {
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
-        let value = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let value = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         let label = value.label();
         // push a new message
         assert_eq!(
@@ -253,7 +255,7 @@ mod test {
     fn test_process_push_old_version() {
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
-        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey());
+        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey(), 0);
         ci.wallclock = 1;
         let value = CrdsValue::ContactInfo(ci.clone());
 
@@ -272,8 +274,8 @@ mod test {
     fn test_process_push_timeout() {
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
-        let timeout = push.push_msg_timeout;
-        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey());
+        let timeout = push.msg_timeout;
+        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey(), 0);
 
         // push a version to far in the future
         ci.wallclock = timeout + 1;
@@ -295,7 +297,7 @@ mod test {
     fn test_process_push_update() {
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
-        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey());
+        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey(), 0);
         ci.wallclock = 0;
         let value_old = CrdsValue::ContactInfo(ci.clone());
 
@@ -329,13 +331,13 @@ mod test {
         logger::setup();
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
-        let value1 = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let value1 = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
 
         assert_eq!(crds.insert(value1.clone(), 0), Ok(None));
         push.refresh_push_active_set(&crds, Pubkey::default(), 1, 1);
 
         assert!(push.active_set.get(&value1.label().pubkey()).is_some());
-        let value2 = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let value2 = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         assert!(push.active_set.get(&value2.label().pubkey()).is_none());
         assert_eq!(crds.insert(value2.clone(), 0), Ok(None));
         for _ in 0..30 {
@@ -348,7 +350,7 @@ mod test {
 
         for _ in 0..push.num_active {
             let value2 =
-                CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+                CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
             assert_eq!(crds.insert(value2.clone(), 0), Ok(None));
         }
         push.refresh_push_active_set(&crds, Pubkey::default(), 1, 1);
@@ -358,11 +360,12 @@ mod test {
     fn test_new_push_messages() {
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
-        let peer = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let peer = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         assert_eq!(crds.insert(peer.clone(), 0), Ok(None));
         push.refresh_push_active_set(&crds, Pubkey::default(), 1, 1);
 
-        let new_msg = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let new_msg =
+            CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         assert_eq!(
             push.process_push_message(&mut crds, new_msg.clone(), 0),
             Ok(None)
@@ -377,16 +380,17 @@ mod test {
     fn test_process_prune() {
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
-        let peer = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let peer = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         assert_eq!(crds.insert(peer.clone(), 0), Ok(None));
         push.refresh_push_active_set(&crds, Pubkey::default(), 1, 1);
 
-        let new_msg = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let new_msg =
+            CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         assert_eq!(
             push.process_push_message(&mut crds, new_msg.clone(), 0),
             Ok(None)
         );
-        push.process_prune_msg(peer.label().pubkey(), new_msg.label().pubkey());
+        push.process_prune_msg(peer.label().pubkey(), &[new_msg.label().pubkey()]);
         assert_eq!(
             push.new_push_messages(&crds, 0),
             (vec![peer.label().pubkey()], vec![])
@@ -396,11 +400,11 @@ mod test {
     fn test_purge_old_pending_push_messages() {
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
-        let peer = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let peer = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         assert_eq!(crds.insert(peer.clone(), 0), Ok(None));
         push.refresh_push_active_set(&crds, Pubkey::default(), 1, 1);
 
-        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey());
+        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey(), 0);
         ci.wallclock = 1;
         let new_msg = CrdsValue::ContactInfo(ci.clone());
         assert_eq!(
@@ -418,7 +422,7 @@ mod test {
     fn test_purge_old_pushed_once_messages() {
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
-        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey());
+        let mut ci = ContactInfo::new_localhost(Keypair::new().pubkey(), 0);
         ci.wallclock = 0;
         let value = CrdsValue::ContactInfo(ci.clone());
         let label = value.label();

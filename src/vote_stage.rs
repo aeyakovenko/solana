@@ -36,7 +36,7 @@ pub fn create_new_signed_vote_blob(
     let shared_blob = SharedBlob::default();
     let tick_height = bank.get_tick_height();
 
-    let leader_tpu = get_leader_tpu(bank, cluster_info)?;
+    let leader_tpu = get_leader_tpu(cluster_info)?;
     //TODO: doesn't seem like there is a synchronous call to get height and id
     debug!("voting on {:?}", &last_id.as_ref()[..8]);
     let vote = Vote { tick_height };
@@ -53,20 +53,8 @@ pub fn create_new_signed_vote_blob(
     Ok(shared_blob)
 }
 
-fn get_leader_tpu(bank: &Bank, cluster_info: &Arc<RwLock<ClusterInfo>>) -> Result<SocketAddr> {
-    let leader_id = {
-        if let Some(leader_id) = bank.get_current_leader() {
-            leader_id
-        } else {
-            return Err(Error::VoteError(VoteError::NoLeader));
-        }
-    };
-
-    let rcluster_info = cluster_info.read().unwrap();
-    let leader_tpu = rcluster_info
-        .table
-        .get(&leader_id)
-        .map(|leader| leader.contact_info.tpu);
+fn get_leader_tpu(cluster_info: &Arc<RwLock<ClusterInfo>>) -> Result<SocketAddr> {
+    let leader_tpu = cluster_info.read().unwrap().leader_data().map(|l| l.tpu);
 
     if let Some(leader_tpu) = leader_tpu {
         Ok(leader_tpu)

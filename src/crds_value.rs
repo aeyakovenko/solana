@@ -76,19 +76,19 @@ impl CrdsValue {
             CrdsValue::LeaderId(leader_id) => CrdsValueLabel::LeaderId(leader_id.id),
         }
     }
-    pub fn contact_info(self) -> Option<ContactInfo> {
+    pub fn contact_info(&self) -> Option<&ContactInfo> {
         match self {
             CrdsValue::ContactInfo(contact_info) => Some(contact_info),
             _ => None,
         }
     }
-    pub fn leader_id(self) -> Option<LeaderId> {
+    pub fn leader_id(&self) -> Option<&LeaderId> {
         match self {
             CrdsValue::LeaderId(leader_id) => Some(leader_id),
             _ => None,
         }
     }
-    pub fn vote(self) -> Option<Vote> {
+    pub fn vote(&self) -> Option<&Vote> {
         match self {
             CrdsValue::Vote(vote) => Some(vote),
             _ => None,

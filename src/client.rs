@@ -11,10 +11,5 @@ pub fn mk_client(r: &NodeInfo) -> ThinClient {
         .set_read_timeout(Some(Duration::new(1, 0)))
         .unwrap();
 
-    ThinClient::new(
-        r.contact_info.rpu,
-        requests_socket,
-        r.contact_info.tpu,
-        transactions_socket,
-    )
+    ThinClient::new(r.rpu, requests_socket, r.tpu, transactions_socket)
 }

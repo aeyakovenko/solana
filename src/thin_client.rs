@@ -430,7 +430,10 @@ pub fn poll_gossip_for_leader(leader_ncp: SocketAddr, timeout: Option<u64>) -> R
     );
 
     let leader_entry_point = NodeInfo::new_entry_point(&leader_ncp);
-    cluster_info.write().unwrap().insert(&leader_entry_point);
+    cluster_info
+        .write()
+        .unwrap()
+        .insert_info(leader_entry_point);
 
     sleep(Duration::from_millis(100));
 
@@ -548,9 +551,9 @@ mod tests {
         let transactions_socket = UdpSocket::bind("0.0.0.0:0").unwrap();
 
         let mut client = ThinClient::new(
-            leader_data.contact_info.rpu,
+            leader_data.rpu,
             requests_socket,
-            leader_data.contact_info.tpu,
+            leader_data.tpu,
             transactions_socket,
         );
         let last_id = client.get_last_id();
@@ -604,9 +607,9 @@ mod tests {
             .unwrap();
         let transactions_socket = UdpSocket::bind("0.0.0.0:0").unwrap();
         let mut client = ThinClient::new(
-            leader_data.contact_info.rpu,
+            leader_data.rpu,
             requests_socket,
-            leader_data.contact_info.tpu,
+            leader_data.tpu,
             transactions_socket,
         );
         let last_id = client.get_last_id();
@@ -670,9 +673,9 @@ mod tests {
             .unwrap();
         let transactions_socket = UdpSocket::bind("0.0.0.0:0").unwrap();
         let mut client = ThinClient::new(
-            leader_data.contact_info.rpu,
+            leader_data.rpu,
             requests_socket,
-            leader_data.contact_info.tpu,
+            leader_data.tpu,
             transactions_socket,
         );
         let last_id = client.get_last_id();
@@ -724,9 +727,9 @@ mod tests {
             .unwrap();
         let transactions_socket = UdpSocket::bind("0.0.0.0:0").unwrap();
         let mut client = ThinClient::new(
-            leader_data.contact_info.rpu,
+            leader_data.rpu,
             requests_socket,
-            leader_data.contact_info.tpu,
+            leader_data.tpu,
             transactions_socket,
         );
 
@@ -835,9 +838,9 @@ mod tests {
             .unwrap();
         let transactions_socket = UdpSocket::bind("0.0.0.0:0").unwrap();
         let mut client = ThinClient::new(
-            leader_data.contact_info.rpu,
+            leader_data.rpu,
             requests_socket,
-            leader_data.contact_info.tpu,
+            leader_data.tpu,
             transactions_socket,
         );
         let last_id = client.get_last_id();

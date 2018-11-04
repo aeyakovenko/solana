@@ -14,6 +14,7 @@ use packet::SharedBlobs;
 use rayon::prelude::*;
 use result::{Error, Result};
 use service::Service;
+use solana_sdk::pubkey::Pubkey;
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -33,6 +34,7 @@ pub enum BroadcastStageReturnType {
 fn broadcast(
     leader_scheduler: &Arc<RwLock<LeaderScheduler>>,
     mut tick_height: u64,
+    leader_id: Pubkey,
     node_info: &NodeInfo,
     broadcast_table: &[NodeInfo],
     window: &SharedWindow,
@@ -139,6 +141,7 @@ fn broadcast(
         ClusterInfo::broadcast(
             &leader_scheduler,
             tick_height,
+            leader_id,
             &node_info,
             &broadcast_table,
             &window,
@@ -208,10 +211,12 @@ impl BroadcastStage {
         let mut receive_index = entry_height;
         let me = cluster_info.read().unwrap().my_data().clone();
         loop {
-            let broadcast_table = cluster_info.read().unwrap().compute_broadcast_table();
+            let broadcast_table = cluster_info.read().unwrap().tpu_peers();
+            let leader_id = cluster_info.read().unwrap().leader_id();
             if let Err(e) = broadcast(
                 leader_scheduler,
                 tick_height,
+                leader_id,
                 &me,
                 &broadcast_table,
                 &window,

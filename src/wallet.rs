@@ -1109,11 +1109,11 @@ mod tests {
         sleep(Duration::from_millis(900));
 
         let (sender, receiver) = channel();
-        run_local_drone(alice.keypair(), leader_data.contact_info.ncp, sender);
+        run_local_drone(alice.keypair(), leader_data.ncp, sender);
         config.drone_addr = receiver.recv().unwrap();
         config.leader = leader_data1;
 
-        let mut rpc_addr = leader_data.contact_info.ncp;
+        let mut rpc_addr = leader_data.ncp;
         rpc_addr.set_port(rpc_port);
         config.rpc_addr = format!("http://{}", rpc_addr.to_string());
 
@@ -1190,10 +1190,10 @@ mod tests {
         sleep(Duration::from_millis(900));
 
         let (sender, receiver) = channel();
-        run_local_drone(alice.keypair(), leader_data.contact_info.ncp, sender);
+        run_local_drone(alice.keypair(), leader_data.ncp, sender);
         let drone_addr = receiver.recv().unwrap();
 
-        let mut addr = leader_data.contact_info.ncp;
+        let mut addr = leader_data.ncp;
         addr.set_port(rpc_port);
         let rpc_addr = format!("http://{}", addr.to_string());
 
@@ -1273,13 +1273,13 @@ mod tests {
         sleep(Duration::from_millis(900));
 
         let (sender, receiver) = channel();
-        run_local_drone(alice.keypair(), leader_data.contact_info.ncp, sender);
+        run_local_drone(alice.keypair(), leader_data.ncp, sender);
         config_payer.drone_addr = receiver.recv().unwrap();
         config_witness.drone_addr = config_payer.drone_addr.clone();
         config_payer.leader = leader_data1;
         config_witness.leader = leader_data2;
 
-        let mut rpc_addr = leader_data.contact_info.ncp;
+        let mut rpc_addr = leader_data.ncp;
         rpc_addr.set_port(rpc_port);
         config_payer.rpc_addr = format!("http://{}", rpc_addr.to_string());
         config_witness.rpc_addr = config_payer.rpc_addr.clone();
@@ -1397,13 +1397,13 @@ mod tests {
         sleep(Duration::from_millis(900));
 
         let (sender, receiver) = channel();
-        run_local_drone(alice.keypair(), leader_data.contact_info.ncp, sender);
+        run_local_drone(alice.keypair(), leader_data.ncp, sender);
         config_payer.drone_addr = receiver.recv().unwrap();
         config_witness.drone_addr = config_payer.drone_addr.clone();
         config_payer.leader = leader_data1;
         config_witness.leader = leader_data2;
 
-        let mut rpc_addr = leader_data.contact_info.ncp;
+        let mut rpc_addr = leader_data.ncp;
         rpc_addr.set_port(rpc_port);
         config_payer.rpc_addr = format!("http://{}", rpc_addr.to_string());
         config_witness.rpc_addr = config_payer.rpc_addr.clone();
@@ -1520,13 +1520,13 @@ mod tests {
         sleep(Duration::from_millis(900));
 
         let (sender, receiver) = channel();
-        run_local_drone(alice.keypair(), leader_data.contact_info.ncp, sender);
+        run_local_drone(alice.keypair(), leader_data.ncp, sender);
         config_payer.drone_addr = receiver.recv().unwrap();
         config_witness.drone_addr = config_payer.drone_addr.clone();
         config_payer.leader = leader_data1;
         config_witness.leader = leader_data2;
 
-        let mut rpc_addr = leader_data.contact_info.ncp;
+        let mut rpc_addr = leader_data.ncp;
         rpc_addr.set_port(rpc_port);
         config_payer.rpc_addr = format!("http://{}", rpc_addr.to_string());
         config_witness.rpc_addr = config_payer.rpc_addr.clone();

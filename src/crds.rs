@@ -159,38 +159,6 @@ impl Crds {
     pub fn remove(&mut self, key: &CrdsValueLabel) {
         self.table.remove(key);
     }
-
-    pub fn contact_info_trace(&self, leader_id: Pubkey) -> String {
-        let nodes: Vec<_> = self
-            .table
-            .values()
-            .filter_map(|v| (*v).value.clone().contact_info())
-            .map(|node| {
-                format!(
-                    " ncp: {:20} | {}{}\n \
-                     rpu: {:20} |\n \
-                     tpu: {:20} |\n",
-                    node.ncp.to_string(),
-                    node.id,
-                    if node.id == leader_id {
-                        " <==== leader"
-                    } else {
-                        ""
-                    },
-                    node.rpu.to_string(),
-                    node.tpu.to_string()
-                )
-            }).collect();
-
-        format!(
-            " Contact_info              | Node identifier\n\
-             ---------------------------+------------------\n\
-             {}\n \
-             Nodes: {}",
-            nodes.join(""),
-            nodes.len()
-        )
-    }
 }
 
 #[cfg(test)]

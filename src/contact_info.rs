@@ -1,6 +1,7 @@
 use signature::{Keypair, KeypairUtil};
 use solana_sdk::pubkey::Pubkey;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use timing::timestamp;
 
 /// Structure representing a node on the network
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -59,6 +60,7 @@ impl ContactInfo {
         rpu: SocketAddr,
         tpu: SocketAddr,
         storage_addr: SocketAddr,
+        now: u64,
     ) -> Self {
         ContactInfo {
             id,
@@ -67,11 +69,11 @@ impl ContactInfo {
             rpu,
             tpu,
             storage_addr,
-            wallclock: 0,
+            wallclock: now,
         }
     }
 
-    pub fn new_localhost(id: Pubkey) -> Self {
+    pub fn new_localhost(id: Pubkey, now: u64) -> Self {
         Self::new(
             id,
             socketaddr!("127.0.0.1:1234"),
@@ -79,6 +81,7 @@ impl ContactInfo {
             socketaddr!("127.0.0.1:1236"),
             socketaddr!("127.0.0.1:1237"),
             socketaddr!("127.0.0.1:1238"),
+            now,
         )
     }
 
@@ -87,7 +90,7 @@ impl ContactInfo {
     pub fn new_multicast() -> Self {
         let addr = socketaddr!("224.0.1.255:1000");
         assert!(addr.ip().is_multicast());
-        Self::new(Keypair::new().pubkey(), addr, addr, addr, addr, addr)
+        Self::new(Keypair::new().pubkey(), addr, addr, addr, addr, addr, 0)
     }
     fn next_port(addr: &SocketAddr, nxt: u16) -> SocketAddr {
         let mut nxt_addr = *addr;
@@ -106,6 +109,7 @@ impl ContactInfo {
             requests_addr,
             transactions_addr,
             "0.0.0.0:0".parse().unwrap(),
+            timestamp(),
         )
     }
     pub fn new_with_socketaddr(bind_addr: &SocketAddr) -> Self {
@@ -115,7 +119,15 @@ impl ContactInfo {
     //
     pub fn new_entry_point(gossip_addr: &SocketAddr) -> Self {
         let daddr: SocketAddr = socketaddr!("0.0.0.0:0");
-        ContactInfo::new(Pubkey::default(), *gossip_addr, daddr, daddr, daddr, daddr)
+        ContactInfo::new(
+            Pubkey::default(),
+            *gossip_addr,
+            daddr,
+            daddr,
+            daddr,
+            daddr,
+            timestamp(),
+        )
     }
     fn is_valid_ip(addr: IpAddr) -> bool {
         !(addr.is_unspecified() || addr.is_multicast())
@@ -184,5 +196,18 @@ mod tests {
         assert_eq!(ci.tvu.port(), 12);
         assert_eq!(ci.rpu.port(), 13);
         assert!(ci.storage_addr.ip().is_unspecified());
+    }
+    #[test]
+    fn replicated_data_new_with_socketaddr_with_pubkey() {
+        let keypair = Keypair::new();
+        let d1 = ContactInfo::new_with_pubkey_socketaddr(
+            keypair.pubkey().clone(),
+            &socketaddr!("127.0.0.1:1234"),
+        );
+        assert_eq!(d1.id, keypair.pubkey());
+        assert_eq!(d1.ncp, socketaddr!("127.0.0.1:1235"));
+        assert_eq!(d1.tvu, socketaddr!("127.0.0.1:1236"));
+        assert_eq!(d1.rpu, socketaddr!("127.0.0.1:1237"));
+        assert_eq!(d1.tpu, socketaddr!("127.0.0.1:1234"));
     }
 }

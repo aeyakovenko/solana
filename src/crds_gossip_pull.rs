@@ -23,6 +23,8 @@ use std::cmp;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+pub const CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS: u64 = 15000;
+
 pub struct CrdsGossipPull {
     /// timestamp of last request
     pub pull_request_time: HashMap<Pubkey, u64>,
@@ -30,6 +32,7 @@ pub struct CrdsGossipPull {
     purged_values: VecDeque<(Hash, u64)>,
     /// max bytes per message
     pub max_bytes: usize,
+    pub crds_timeout: u64,
 }
 
 impl Default for CrdsGossipPull {
@@ -38,6 +41,7 @@ impl Default for CrdsGossipPull {
             purged_values: VecDeque::new(),
             pull_request_time: HashMap::new(),
             max_bytes: BLOB_DATA_SIZE,
+            crds_timeout: CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS,
         }
     }
 }
@@ -52,14 +56,14 @@ impl CrdsGossipPull {
         let mut options: Vec<_> = crds
             .table
             .values()
-            .filter_map(|v| (*v).value.clone().contact_info())
+            .filter_map(|v| v.value.contact_info())
             .filter(|v| {
                 v.id != self_id && !v.ncp.ip().is_unspecified() && !v.ncp.ip().is_multicast()
             }).map(|item| {
                 let req_time: u64 = *self.pull_request_time.get(&item.id).unwrap_or(&0);
                 let weight = cmp::max(
                     1,
-                    cmp::min(u32::max_value() as u64 - 1, now - req_time) as u32,
+                    cmp::min(u16::max_value() as u64 - 1, (now - req_time) / 1024) as u32,
                 );
                 Weighted { weight, item }
             }).collect();
@@ -68,7 +72,9 @@ impl CrdsGossipPull {
         }
         let filter = self.build_crds_filter(crds);
         let random = WeightedChoice::new(&mut options).sample(&mut rand::thread_rng());
-        let self_info = crds.lookup(&CrdsValueLabel::ContactInfo(self_id)).unwrap();
+        let self_info = crds
+            .lookup(&CrdsValueLabel::ContactInfo(self_id))
+            .unwrap_or_else(|| panic!("self_id invalid {}", self_id));
         Ok((random.id, filter, self_info.clone()))
     }
 
@@ -163,10 +169,12 @@ impl CrdsGossipPull {
             .iter()
             .filter(|label| label.pubkey() != self_id)
             .filter_map(|label| {
-                crds.lookup_versioned(label)
-                    .map(|val| (val.value_hash, val.local_timestamp))
+                let rv = crds
+                    .lookup_versioned(label)
+                    .map(|val| (val.value_hash, val.local_timestamp));
+                crds.remove(label);
+                rv
             }).collect();
-        old.iter().for_each(|label| crds.remove(label));
         self.purged_values.append(&mut purged);
     }
     /// Purge values from the `self.purged_values` queue that are older then purge_timeout
@@ -189,7 +197,7 @@ mod test {
     #[test]
     fn test_new_pull_request() {
         let mut crds = Crds::default();
-        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         let id = entry.label().pubkey();
         let node = CrdsGossipPull::default();
         assert_eq!(
@@ -203,7 +211,7 @@ mod test {
             Err(CrdsGossipError::NoPeers)
         );
 
-        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         crds.insert(new.clone(), 0).unwrap();
         let req = node.new_pull_request(&crds, id, 0);
         let (to, _, self_info) = req.unwrap();
@@ -214,13 +222,13 @@ mod test {
     #[test]
     fn test_new_mark_creation_time() {
         let mut crds = Crds::default();
-        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         let node_id = entry.label().pubkey();
         let mut node = CrdsGossipPull::default();
         crds.insert(entry.clone(), 0).unwrap();
-        let old = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let old = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         crds.insert(old.clone(), 0).unwrap();
-        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         crds.insert(new.clone(), 0).unwrap();
 
         // set request creation time to max_value
@@ -238,11 +246,11 @@ mod test {
     #[test]
     fn test_process_pull_request() {
         let mut node_crds = Crds::default();
-        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         let node_id = entry.label().pubkey();
         let node = CrdsGossipPull::default();
         node_crds.insert(entry.clone(), 0).unwrap();
-        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         node_crds.insert(new.clone(), 0).unwrap();
         let req = node.new_pull_request(&node_crds, node_id, 0);
 
@@ -270,16 +278,16 @@ mod test {
     #[test]
     fn test_process_pull_request_response() {
         let mut node_crds = Crds::default();
-        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         let node_id = entry.label().pubkey();
         let mut node = CrdsGossipPull::default();
         node_crds.insert(entry.clone(), 0).unwrap();
-        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         node_crds.insert(new.clone(), 0).unwrap();
 
         let mut dest = CrdsGossipPull::default();
         let mut dest_crds = Crds::default();
-        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let new = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         dest_crds.insert(new.clone(), 0).unwrap();
 
         // node contains a key from the dest node, but at an older local timestamp
@@ -335,14 +343,24 @@ mod test {
     #[test]
     fn test_gossip_purge() {
         let mut node_crds = Crds::default();
-        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
-        let node_id = entry.label().pubkey();
+        let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
+        let node_label = entry.label();
+        let node_id = node_label.pubkey();
         let mut node = CrdsGossipPull::default();
         node_crds.insert(entry.clone(), 0).unwrap();
-        let old = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+        let old = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey(), 0));
         node_crds.insert(old.clone(), 0).unwrap();
         let value_hash = node_crds.lookup_versioned(&old.label()).unwrap().value_hash;
+
+        //verfiy self is valid
+        assert_eq!(node_crds.lookup(&node_label).unwrap().label(), node_label);
+
+        // purge
         node.purge_active(&mut node_crds, node_id, 1);
+
+        //verfiy self is still valid after purge
+        assert_eq!(node_crds.lookup(&node_label).unwrap().label(), node_label);
+
         assert_eq!(node_crds.lookup_versioned(&old.label()), None);
         assert_eq!(node.purged_values.len(), 1);
         for _ in 0..30 {

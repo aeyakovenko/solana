@@ -41,10 +41,10 @@ fn make_spy_node(leader: &NodeInfo) -> (Ncp, Arc<RwLock<ClusterInfo>>, Pubkey) {
     let mut spy = Node::new_localhost();
     let me = spy.info.id.clone();
     let daddr = "0.0.0.0:0".parse().unwrap();
-    spy.info.contact_info.tvu = daddr;
-    spy.info.contact_info.rpu = spy.sockets.transaction[0].local_addr().unwrap();
+    spy.info.tvu = daddr;
+    spy.info.rpu = spy.sockets.transaction[0].local_addr().unwrap();
     let mut spy_cluster_info = ClusterInfo::new(spy.info).expect("ClusterInfo::new");
-    spy_cluster_info.insert(&leader);
+    spy_cluster_info.insert_info(leader.clone());
     spy_cluster_info.set_leader(leader.id);
     let spy_cluster_info_ref = Arc::new(RwLock::new(spy_cluster_info));
     let spy_window = Arc::new(RwLock::new(default_window()));
@@ -68,7 +68,7 @@ fn converge(leader: &NodeInfo, num_nodes: usize) -> Vec<NodeInfo> {
     let mut rv = vec![];
     for _ in 0..30 {
         let num = spy_ref.read().unwrap().convergence();
-        let mut v = spy_ref.read().unwrap().get_valid_peers();
+        let mut v = spy_ref.read().unwrap().rpu_peers();
         if num >= num_nodes as u64 && v.len() >= num_nodes {
             rv.append(&mut v);
             converged = true;
@@ -158,7 +158,7 @@ fn test_multi_node_ledger_window() -> result::Result<()> {
         &zero_ledger_path,
         keypair,
         Arc::new(Keypair::new()),
-        Some(leader_data.contact_info.ncp),
+        Some(leader_data.ncp),
         false,
         LeaderScheduler::from_bootstrap_leader(leader_pubkey),
     );
@@ -262,7 +262,7 @@ fn test_multi_node_validator_catchup_from_zero() -> result::Result<()> {
             &ledger_path,
             keypair,
             Arc::new(Keypair::new()),
-            Some(leader_data.contact_info.ncp),
+            Some(leader_data.ncp),
             false,
             LeaderScheduler::from_bootstrap_leader(leader_pubkey),
         );
@@ -299,7 +299,7 @@ fn test_multi_node_validator_catchup_from_zero() -> result::Result<()> {
         &zero_ledger_path,
         keypair,
         Arc::new(Keypair::new()),
-        Some(leader_data.contact_info.ncp),
+        Some(leader_data.ncp),
         false,
         LeaderScheduler::from_bootstrap_leader(leader_pubkey),
     );
@@ -395,7 +395,7 @@ fn test_multi_node_basic() {
             &ledger_path,
             keypair,
             Arc::new(Keypair::new()),
-            Some(leader_data.contact_info.ncp),
+            Some(leader_data.ncp),
             false,
             LeaderScheduler::from_bootstrap_leader(leader_pubkey),
         );
@@ -468,7 +468,7 @@ fn test_boot_validator_from_file() -> result::Result<()> {
         &ledger_path,
         keypair,
         Arc::new(Keypair::new()),
-        Some(leader_data.contact_info.ncp),
+        Some(leader_data.ncp),
         false,
         LeaderScheduler::from_bootstrap_leader(leader_pubkey),
     );
@@ -551,7 +551,7 @@ fn test_leader_restart_validator_start_from_old_ledger() -> result::Result<()> {
         &stale_ledger_path,
         keypair,
         Arc::new(Keypair::new()),
-        Some(leader_data.contact_info.ncp),
+        Some(leader_data.ncp),
         false,
         LeaderScheduler::from_bootstrap_leader(leader_data.id),
     );
@@ -689,7 +689,7 @@ fn test_multi_node_dynamic_network() {
                         &ledger_path,
                         Arc::new(keypair),
                         Arc::new(Keypair::new()),
-                        Some(leader_data.contact_info.ncp),
+                        Some(leader_data.ncp),
                         true,
                         LeaderScheduler::from_bootstrap_leader(leader_pubkey),
                     );
@@ -833,7 +833,7 @@ fn test_leader_to_validator_transition() {
         &leader_ledger_path,
         leader_keypair,
         Arc::new(Keypair::new()),
-        Some(leader_info.contact_info.ncp),
+        Some(leader_info.ncp),
         false,
         LeaderScheduler::new(&leader_scheduler_config),
     );
@@ -846,7 +846,7 @@ fn test_leader_to_validator_transition() {
     let mut converged = false;
     for _ in 0..30 {
         let num = spy_node.read().unwrap().convergence();
-        let mut v: Vec<NodeInfo> = spy_node.read().unwrap().get_valid_peers();
+        let mut v: Vec<NodeInfo> = spy_node.read().unwrap().rpu_peers();
         // There's only one person excluding the spy node (the leader) who should see
         // two nodes on the network
         if num >= 2 as u64 && v.len() >= 1 {
@@ -968,7 +968,7 @@ fn test_leader_validator_basic() {
         &validator_ledger_path,
         validator_keypair,
         Arc::new(vote_account_keypair),
-        Some(leader_info.contact_info.ncp),
+        Some(leader_info.ncp),
         false,
         LeaderScheduler::new(&leader_scheduler_config),
     );
@@ -979,7 +979,7 @@ fn test_leader_validator_basic() {
         &leader_ledger_path,
         leader_keypair,
         Arc::new(Keypair::new()),
-        Some(leader_info.contact_info.ncp),
+        Some(leader_info.ncp),
         false,
         LeaderScheduler::new(&leader_scheduler_config),
     );
@@ -1150,7 +1150,7 @@ fn test_dropped_handoff_recovery() {
         &bootstrap_leader_ledger_path,
         bootstrap_leader_keypair,
         Arc::new(Keypair::new()),
-        Some(bootstrap_leader_info.contact_info.ncp),
+        Some(bootstrap_leader_info.ncp),
         false,
         LeaderScheduler::new(&leader_scheduler_config),
     );
@@ -1172,7 +1172,7 @@ fn test_dropped_handoff_recovery() {
             &validator_ledger_path,
             kp,
             Arc::new(Keypair::new()),
-            Some(bootstrap_leader_info.contact_info.ncp),
+            Some(bootstrap_leader_info.ncp),
             false,
             LeaderScheduler::new(&leader_scheduler_config),
         );
@@ -1197,7 +1197,7 @@ fn test_dropped_handoff_recovery() {
         &next_leader_ledger_path,
         next_leader_keypair,
         Arc::new(vote_account_keypair),
-        Some(bootstrap_leader_info.contact_info.ncp),
+        Some(bootstrap_leader_info.ncp),
         false,
         LeaderScheduler::new(&leader_scheduler_config),
     );
@@ -1312,7 +1312,7 @@ fn test_full_leader_validator_network() {
         &bootstrap_leader_ledger_path,
         Arc::new(node_keypairs.pop_front().unwrap()),
         Arc::new(vote_account_keypairs.pop_front().unwrap()),
-        Some(bootstrap_leader_info.contact_info.ncp),
+        Some(bootstrap_leader_info.ncp),
         false,
         LeaderScheduler::new(&leader_scheduler_config),
     )));
@@ -1338,7 +1338,7 @@ fn test_full_leader_validator_network() {
             &validator_ledger_path,
             Arc::new(kp),
             Arc::new(vote_account_keypairs.pop_front().unwrap()),
-            Some(bootstrap_leader_info.contact_info.ncp),
+            Some(bootstrap_leader_info.ncp),
             false,
             LeaderScheduler::new(&leader_scheduler_config),
         )));
@@ -1460,14 +1460,9 @@ fn mk_client(leader: &NodeInfo) -> ThinClient {
         .set_read_timeout(Some(Duration::new(1, 0)))
         .unwrap();
     let transactions_socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-    assert!(ClusterInfo::is_valid_address(&leader.contact_info.rpu));
-    assert!(ClusterInfo::is_valid_address(&leader.contact_info.tpu));
-    ThinClient::new(
-        leader.contact_info.rpu,
-        requests_socket,
-        leader.contact_info.tpu,
-        transactions_socket,
-    )
+    assert!(ClusterInfo::is_valid_address(&leader.rpu));
+    assert!(ClusterInfo::is_valid_address(&leader.tpu));
+    ThinClient::new(leader.rpu, requests_socket, leader.tpu, transactions_socket)
 }
 
 fn send_tx_and_retry_get_balance(
