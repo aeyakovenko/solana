@@ -175,6 +175,9 @@ impl CrdsGossipPush {
             }
             let bloom = Bloom::random(network_size, 0.1, 1024 * 8 * 4);
             new_items.insert(val.0.pubkey(), bloom);
+            if new_items.len() == need {
+                break;
+            }
         }
         trace!("print {}", new_items.len());
         let mut keys: Vec<Pubkey> = self.active_set.keys().cloned().collect();
