@@ -133,8 +133,11 @@ mod test {
     use rayon::prelude::*;
     use signature::{Keypair, KeypairUtil};
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
-    fn star_network_create(num: usize) -> HashMap<Pubkey, CrdsGossip> {
+    type Node = Arc<Mutex<CrdsGossip>>;
+    type Network = HashMap<Pubkey, Node>;
+    fn star_network_create(num: usize) -> Network {
         let entry = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
         let mut network: HashMap<_, _> = (1..num)
             .map(|_| {
@@ -145,17 +148,17 @@ mod test {
                 node.crds.insert(new.clone(), 0).unwrap();
                 node.crds.insert(entry.clone(), 0).unwrap();
                 node.set_self(id);
-                (new.label().pubkey(), node)
+                (new.label().pubkey(), Arc::new(Mutex::new(node)))
             }).collect();
         let mut node = CrdsGossip::default();
         let id = entry.label().pubkey();
         node.crds.insert(entry.clone(), 0).unwrap();
         node.set_self(id);
-        network.insert(id, node);
+        network.insert(id, Arc::new(Mutex::new(node)));
         network
     }
 
-    fn ring_network_create(num: usize) -> HashMap<Pubkey, CrdsGossip> {
+    fn ring_network_create(num: usize) -> Network {
         let mut network: HashMap<_, _> = (0..num)
             .map(|_| {
                 let new =
@@ -164,25 +167,28 @@ mod test {
                 let mut node = CrdsGossip::default();
                 node.crds.insert(new.clone(), 0).unwrap();
                 node.set_self(id);
-                (new.label().pubkey(), node)
+                (new.label().pubkey(), Arc::new(Mutex::new(node)))
             }).collect();
         let keys: Vec<Pubkey> = network.keys().cloned().collect();
         for k in 0..keys.len() {
             let start_info = {
                 let start = &network[&keys[k]];
+                let start_id = start.lock().unwrap().id.clone();
                 start
+                    .lock()
+                    .unwrap()
                     .crds
-                    .lookup(&CrdsValueLabel::ContactInfo(start.id))
+                    .lookup(&CrdsValueLabel::ContactInfo(start_id))
                     .unwrap()
                     .clone()
             };
             let end = network.get_mut(&keys[(k + 1) % keys.len()]).unwrap();
-            end.crds.insert(start_info, 0).unwrap();
+            end.lock().unwrap().crds.insert(start_info, 0).unwrap();
         }
         network
     }
 
-    fn network_simulator_pull_only(network: &mut HashMap<Pubkey, CrdsGossip>) {
+    fn network_simulator_pull_only(network: &mut Network) {
         let num = network.len();
         let (converged, bytes_tx) = network_run_pull(network, 0, num * 2, 0.9);
         trace!(
@@ -194,14 +200,15 @@ mod test {
         assert!(converged >= 0.9);
     }
 
-    fn network_simulator(network: &mut HashMap<Pubkey, CrdsGossip>) {
+    fn network_simulator(network: &mut Network) {
         let num = network.len();
         // run for a small amount of time
         let (converged, bytes_tx) = network_run_pull(network, 0, 10, 1.0);
         trace!("network_simulator_push_{}: converged: {}", num, converged);
         // make sure there is someone in the active set
-        network.values_mut().for_each(|node| {
-            node.refresh_push_active_set(10);
+        let network_values: Vec<Node> = network.values().cloned().collect();
+        network_values.par_iter().for_each(|node| {
+            node.lock().unwrap().refresh_push_active_set(10);
         });
         let mut total_bytes = bytes_tx;
         for second in 1..num {
@@ -209,7 +216,8 @@ mod test {
             let end = (second + 1) * 10;
             let now = (start * 100) as u64;
             // push a message to the network
-            network.values_mut().for_each(|node| {
+            network_values.par_iter().for_each(|locked_node| {
+                let node = &mut locked_node.lock().unwrap();
                 let mut m = node
                     .crds
                     .lookup(&CrdsValueLabel::ContactInfo(node.id))
@@ -244,11 +252,7 @@ mod test {
         }
     }
 
-    fn network_run_push(
-        network: &mut HashMap<Pubkey, CrdsGossip>,
-        start: usize,
-        end: usize,
-    ) -> (usize, usize) {
+    fn network_run_push(network: &mut Network, start: usize, end: usize) -> (usize, usize) {
         let mut bytes: usize = 0;
         let mut num_msgs: usize = 0;
         let mut total: usize = 0;
@@ -256,38 +260,39 @@ mod test {
         let mut prunes: usize = 0;
         let mut timeouts: usize = 0;
         let mut delivered: usize = 0;
+        let network_values: Vec<Node> = network.values().cloned().collect();
         for t in start..end {
             let now = t as u64 * 100;
-            let requests: Vec<_> = network
-                .values_mut()
+            let requests: Vec<_> = network_values
+                .par_iter()
                 .map(|node| {
                     if now > CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS {
-                        node.purge_old_pending_push_messages(
+                        node.lock().unwrap().purge_old_pending_push_messages(
                             now - CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS as u64,
                         );
-                        node.purge_old_pushed_once_messages(
+                        node.lock().unwrap().purge_old_pushed_once_messages(
                             now - 2 * CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS as u64,
                         );
                     }
-                    node.new_push_messages(now)
+                    node.lock().unwrap().new_push_messages(now)
                 }).collect();
-            for (from, peers, msgs) in requests {
+            requests.par_iter().for_each(|(from, peers, msgs)| {
                 for to in peers {
-                    bytes += serialized_size(&msgs).unwrap() as usize;
+                    bytes += serialized_size(msgs).unwrap() as usize;
                     num_msgs += 1;
-                    for m in &msgs {
+                    for m in msgs {
                         let origin = m.label().pubkey();
                         let rsp = network
-                            .get_mut(&to)
-                            .map(|node| node.process_push_message(m.clone(), now))
+                            .get(&to)
+                            .map(|node| node.lock().unwrap().process_push_message(m.clone(), now))
                             .unwrap();
                         if rsp == Err(CrdsGossipError::PushMessagePrune) {
                             prunes += 1;
                             bytes += serialized_size(&to).unwrap() as usize;
                             bytes += serialized_size(&origin).unwrap() as usize;
                             network
-                                .get_mut(&from)
-                                .map(|node| node.process_prune_msg(to, origin))
+                                .get(&from)
+                                .map(|node| node.lock().unwrap().process_prune_msg(*to, origin))
                                 .unwrap();
                         }
                         if rsp == Err(CrdsGossipError::PushMessageTimeout) {
@@ -296,13 +301,18 @@ mod test {
                         delivered += rsp.is_ok() as usize;
                     }
                 }
-            }
+            });
             if now % CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS == 0 && now > 0 {
-                network.values_mut().for_each(|node| {
-                    node.refresh_push_active_set(CRDS_GOSSIP_NUM_ACTIVE);
+                network_values.par_iter().for_each(|node| {
+                    node.lock()
+                        .unwrap()
+                        .refresh_push_active_set(CRDS_GOSSIP_NUM_ACTIVE);
                 });
             }
-            total = network.values().map(|v| v.push.num_pending()).sum();
+            total = network_values
+                .par_iter()
+                .map(|v| v.lock().unwrap().push.num_pending())
+                .sum();
             trace!(
                 "network_run_push_{}: now: {} queue: {} bytes: {} num_msgs: {} prunes: {} timeouts: {} delivered: {}",
                 num,
@@ -319,7 +329,7 @@ mod test {
     }
 
     fn network_run_pull(
-        network: &mut HashMap<Pubkey, CrdsGossip>,
+        network: &mut Network,
         start: usize,
         end: usize,
         max_convergance: f64,
@@ -329,32 +339,42 @@ mod test {
         let mut overhead: usize = 0;
         let mut convergance = 0f64;
         let num = network.len();
+        let network_values: Vec<Node> = network.values().cloned().collect();
         for t in start..end {
             let now = t as u64 * 100;
             let mut requests: Vec<_> = {
-                let values: Vec<_> = network.values().collect();
-                values
+                network_values
                     .par_iter()
-                    .filter_map(|from| from.new_pull_request(now).ok())
+                    .filter_map(|from| from.lock().unwrap().new_pull_request(now).ok())
                     .collect()
             };
-            for (to, mut request, caller_info) in requests {
-                let from = caller_info.label().pubkey();
-                bytes += request.keys.len();
-                bytes += (request.bits.len() / 8) as usize;
-                bytes += serialized_size(&caller_info).unwrap() as usize;
-                let rsp = network
-                    .get_mut(&to)
-                    .map(|node| node.process_pull_request(caller_info, request, now))
-                    .unwrap();
-                bytes += serialized_size(&rsp).unwrap() as usize;
-                msgs += rsp.len();
-                network.get_mut(&from).map(|node| {
-                    node.mark_pull_request_creation_time(from, now);
-                    overhead += node.process_pull_response(from, rsp, now);
+            requests
+                .par_iter()
+                .for_each(|(to, mut request, caller_info)| {
+                    let from = caller_info.label().pubkey();
+                    bytes += request.keys.len();
+                    bytes += (request.bits.len() / 8) as usize;
+                    bytes += serialized_size(&caller_info).unwrap() as usize;
+                    let rsp = network
+                        .get(&to)
+                        .map(|node| {
+                            node.lock()
+                                .unwrap()
+                                .process_pull_request(*caller_info, request, now)
+                        }).unwrap();
+                    bytes += serialized_size(&rsp).unwrap() as usize;
+                    msgs += rsp.len();
+                    network.get_mut(&from).map(|node| {
+                        node.lock()
+                            .unwrap()
+                            .mark_pull_request_creation_time(from, now);
+                        overhead += node.lock().unwrap().process_pull_response(from, rsp, now);
+                    });
                 });
-            }
-            let total: usize = network.values().map(|v| v.crds.table.len()).sum();
+            let total: usize = network_values
+                .par_iter()
+                .map(|v| v.lock().unwrap().crds.table.len())
+                .sum();
             convergance = total as f64 / ((num * num) as f64);
             if convergance > max_convergance {
                 break;
