@@ -153,13 +153,20 @@ impl CrdsGossipPush {
         network_size: usize,
         ratio: usize,
     ) {
+        trace!(
+            "compute {} {} {}",
+            self.num_active,
+            self.active_set.len(),
+            ratio
+        );
         let need = Self::compute_need(self.num_active, self.active_set.len(), ratio);
-        trace!("print {}", need);
+        trace!("need {}", need);
         let mut new_items = HashMap::new();
-        for _ in 0..crds.table.len() {
-            let item = crds
-                .table
-                .get_index(rand::thread_rng().gen_range(0, crds.table.len()));
+        let mut ixs: Vec<_> = (0..crds.table.len()).into_iter().collect();
+        rand::thread_rng().shuffle(&mut ixs);
+
+        for ix in ixs {
+            let item = crds.table.get_index(ix);
             if item.is_none() {
                 continue;
             }
@@ -179,7 +186,6 @@ impl CrdsGossipPush {
                 break;
             }
         }
-        trace!("print {}", new_items.len());
         let mut keys: Vec<Pubkey> = self.active_set.keys().cloned().collect();
         rand::thread_rng().shuffle(&mut keys);
         let num = keys.len() / ratio;
@@ -326,11 +332,15 @@ mod test {
     }
     #[test]
     fn test_refresh_active_set() {
+        use logger;
+        logger::setup();
         let mut crds = Crds::default();
         let mut push = CrdsGossipPush::default();
         let value1 = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+
         assert_eq!(crds.insert(value1.clone(), 0), Ok(None));
         push.refresh_push_active_set(&crds, Pubkey::default(), 1, 1);
+
         assert!(push.active_set.get(&value1.label().pubkey()).is_some());
         let value2 = CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
         assert!(push.active_set.get(&value2.label().pubkey()).is_none());
@@ -342,6 +352,14 @@ mod test {
             }
         }
         assert!(push.active_set.get(&value2.label().pubkey()).is_some());
+
+        for _ in 0..push.num_active {
+            let value2 =
+                CrdsValue::ContactInfo(ContactInfo::new_localhost(Keypair::new().pubkey()));
+            assert_eq!(crds.insert(value2.clone(), 0), Ok(None));
+        }
+        push.refresh_push_active_set(&crds, Pubkey::default(), 1, 1);
+        assert_eq!(push.active_set.len(), push.num_active);
     }
     #[test]
     fn test_new_push_messages() {
