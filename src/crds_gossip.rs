@@ -258,7 +258,6 @@ mod test {
         let mut total: usize = 0;
         let num = network.len();
         let mut prunes: usize = 0;
-        let mut timeouts: usize = 0;
         let mut delivered: usize = 0;
         let network_values: Vec<Node> = network.values().cloned().collect();
         for t in start..end {
@@ -276,7 +275,11 @@ mod test {
                     }
                     node.lock().unwrap().new_push_messages(now)
                 }).collect();
-            requests.par_iter().for_each(|(from, peers, msgs)| {
+            let transfered: Vec<_> = requests.par_iter().map(|(from, peers, msgs)| {
+                let mut bytes: usize = 0;
+                let mut delivered: usize = 0;
+                let mut num_msgs: usize = 0;
+                let mut prunes: usize = 0;
                 for to in peers {
                     bytes += serialized_size(msgs).unwrap() as usize;
                     num_msgs += 1;
@@ -295,13 +298,17 @@ mod test {
                                 .map(|node| node.lock().unwrap().process_prune_msg(*to, origin))
                                 .unwrap();
                         }
-                        if rsp == Err(CrdsGossipError::PushMessageTimeout) {
-                            timeouts += 1;
-                        }
                         delivered += rsp.is_ok() as usize;
                     }
                 }
-            });
+                (bytes, delivered, num_msgs, prunes)
+            }).collect();
+            for (b,d,m,p) in transfered {
+                bytes += b;
+                delivered += d;
+                num_msgs += m;
+                prunes += p;
+            }
             if now % CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS == 0 && now > 0 {
                 network_values.par_iter().for_each(|node| {
                     node.lock()
@@ -314,14 +321,13 @@ mod test {
                 .map(|v| v.lock().unwrap().push.num_pending())
                 .sum();
             trace!(
-                "network_run_push_{}: now: {} queue: {} bytes: {} num_msgs: {} prunes: {} timeouts: {} delivered: {}",
+                "network_run_push_{}: now: {} queue: {} bytes: {} num_msgs: {} prunes: {} delivered: {}",
                 num,
                 now,
                 total,
                 bytes,
                 num_msgs,
                 prunes,
-                timeouts,
                 delivered,
             );
         }
@@ -348,9 +354,12 @@ mod test {
                     .filter_map(|from| from.lock().unwrap().new_pull_request(now).ok())
                     .collect()
             };
-            requests
-                .par_iter()
-                .for_each(|(to, mut request, caller_info)| {
+            let transfered: Vec<_> = requests
+                .into_par_iter()
+                .map(|(to, request, caller_info)| {
+                    let mut bytes: usize = 0;
+                    let mut msgs: usize = 0;
+                    let mut overhead: usize = 0;
                     let from = caller_info.label().pubkey();
                     bytes += request.keys.len();
                     bytes += (request.bits.len() / 8) as usize;
@@ -360,17 +369,23 @@ mod test {
                         .map(|node| {
                             node.lock()
                                 .unwrap()
-                                .process_pull_request(*caller_info, request, now)
+                                .process_pull_request(caller_info, request, now)
                         }).unwrap();
                     bytes += serialized_size(&rsp).unwrap() as usize;
                     msgs += rsp.len();
-                    network.get_mut(&from).map(|node| {
+                    network.get(&from).map(|node| {
                         node.lock()
                             .unwrap()
                             .mark_pull_request_creation_time(from, now);
                         overhead += node.lock().unwrap().process_pull_response(from, rsp, now);
                     });
-                });
+                    (bytes, msgs, overhead)
+                }).collect();
+            for (b,m, o) in transfered {
+                bytes += b;
+                msgs += m;
+                overhead += o;
+            }
             let total: usize = network_values
                 .par_iter()
                 .map(|v| v.lock().unwrap().crds.table.len())
