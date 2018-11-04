@@ -1,54 +1,30 @@
 //! This module implements Cluster Replicated Data Store for
-//! asynchronous updates in a distributed network.  ContactInfo data
-//! type represents the location of distributed nodes in the network
-//! which are hosting copies Crds itself, and ContactInfo is stored in
-//! the Crds itself The Crds maintains a list of the nodes that are
-//! distributing copies of itself.  For all the types replicated in the
-//! Crds, the latest version is picked.  This creates a mutual dependency
-//! between Gossip <-> Crds libraries.
+//! asynchronous updates in a distributed network.
 //!
-//! Semantically data is organized in Labels and Values and is indexed by Pubkey.
-//!     struct PubkeyRecord {
-//!         contact_info: ContactInfo,
-//!         vote: Transaction,
-//!         leader_id: Pubkey,
-//!     }
+//! Data is stored in the CrdsValue type, each type has a specific
+//! CrdsValueLabel.  Labels are semantically grouped into a single record
+//! that is identified by a Pubkey.
+//! * 1 Pubkey maps many CrdsValueLabels
+//! * 1 CrdsValueLabel maps to 1 CrdsValue
+//! The Label, the record Pubkey, and all the record labels can be derived
+//! from a single CrdsValue.
 //!
 //! The actual data is stored in a single map of
 //! `CrdsValueLabel(Pubkey) -> CrdsValue` This allows for partial record
-//! updates to be propagated through the network.  With a label specific merge strategy.
+//! updates to be propagated through the network.
+//!
 //! This means that full `Record` updates are not atomic.
 //!
 //! Additional labels can be added by appending them to the CrdsValueLabel,
 //! CrdsValue enums.
 //!
-//! Merge strategy
-//! `(a: Crds, b: Crds) -> Crds`
-//! is implemented in the following steps:
+//! Merge strategy is implemented in:
+//!     impl PartialOrd for VersionedCrdsValue
 //!
-//! 1. a has a local Crds::version A', and
-//!    it knows of b's remote Crds::version B
-//! 2. b has a local Crds::version B' and it
-//!    knows of a's remote Crds::version A
-//! 3. a asynchronously calls b.get_updates_since(B, max_bytes)
-//! 4. b responds with changes to its `table` between B and up to
-//!    B' and the max version in the response B''
-//! 5. a inserts all the updates that b responded with, records
-//!    a.version value at which they where committed into a.table.
-//!    It updates a.remote[&b] = B''
-//! 6. b does the same
-//! 7. Eventually the values returned in the updated will be
-//!    synchronized and no new inserts will occur in either table.
-//! 8. get_updates_since will then return 0 updates
-//!
-//!
-//! Each item in the Crds has its own version.  It's only successfully
-//! updated if the update has a newer version then what is currently
-//! in the Crds::table.  So if b had no new updates for a, while it
-//! would still transmit data, a's would not update any values in its
-//! table and there for wouldn't update its own Crds::version.
+//! A value is updated to a new version if the labels match, and the value
+//! wallclock is later, or the value hash is greater.
 
-use bincode::{serialize, serialized_size};
+use bincode::serialize;
 use crds_value::{CrdsValue, CrdsValueLabel};
 use hash::{hash, Hash};
 use indexmap::map::IndexMap;
@@ -193,64 +169,6 @@ impl Crds {
         self.table.remove(key);
     }
 
-    /// Get updated node since min_version up to a maximum of `max_bytes` of updates
-    /// * min_version - return updates greater then min_version
-    /// * max_bytes - max number of bytes to encode.  This would allow gossip to fit the response
-    /// into a 64kb packet.
-    /// * remote_versions - The remote `Crds::version` values for each update.  This is a structure
-    /// about the external state of the network that is maintained by the gossip library.
-    /// Returns (max version, updates)  
-    /// * max version - the maximum version that is in the updates
-    /// * updates - a vector of (CrdsValues, CrdsValue's remote update index) that have been changed.  CrdsValues
-    /// remote update index is the last update index seen from the ContactInfo that is referenced by
-    /// CrdsValue::label().pubkey().
-    pub fn get_updates_since(
-        &self,
-        min_version: u64,
-        mut max_bytes: usize,
-        remote_versions: &IndexMap<Pubkey, u64>,
-    ) -> (u64, Vec<(CrdsValue, u64)>) {
-        let mut items: Vec<_> = self
-            .table
-            .iter()
-            .filter_map(|(k, x)| {
-                if k.pubkey() != Pubkey::default() && x.local_version >= min_version {
-                    let remote = *remote_versions.get(&k.pubkey()).unwrap_or(&0);
-                    Some((x, remote))
-                } else {
-                    None
-                }
-            }).collect();
-        trace!("items length: {}", items.len());
-        items.sort_by_key(|k| k.0.local_version);
-        let last = {
-            let mut last = 0;
-            let sz = serialized_size(&min_version).unwrap() as usize;
-            if max_bytes > sz {
-                max_bytes -= sz;
-            }
-            for i in &items {
-                let sz = serialized_size(&(&i.0.value, i.1)).unwrap() as usize;
-                if max_bytes < sz {
-                    break;
-                }
-                max_bytes -= sz;
-                last += 1;
-            }
-            last
-        };
-        let last_version = cmp::max(last, 1) - 1;
-        let max_update_version = items
-            .get(last_version)
-            .map(|i| i.0.local_version)
-            .unwrap_or(0);
-        let updates: Vec<(CrdsValue, u64)> = items
-            .into_iter()
-            .take(last)
-            .map(|x| (x.0.value.clone(), x.1))
-            .collect();
-        (max_update_version, updates)
-    }
     pub fn contact_info_trace(&self, leader_id: Pubkey) -> String {
         let nodes: Vec<_> = self
             .table
@@ -380,46 +298,6 @@ mod test {
         assert_eq!(crds.find_old_labels(1), vec![val.label()]);
         crds.remove(&val.label());
         assert!(crds.find_old_labels(1).is_empty());
-    }
-    #[test]
-    fn test_updates_empty() {
-        let crds = Crds::default();
-        let remotes = IndexMap::new();
-        assert_eq!(crds.get_updates_since(0, 0, &remotes), (0, vec![]));
-        assert_eq!(crds.get_updates_since(0, 1024, &remotes), (0, vec![]));
-    }
-    #[test]
-    fn test_updates_default_key() {
-        let mut crds = Crds::default();
-        let val = CrdsValue::LeaderId(LeaderId::default());
-        assert_matches!(crds.insert(val.clone(), 1), Ok(_));
-        let mut remotes = IndexMap::new();
-        remotes.insert(val.label().pubkey(), 1);
-        assert_eq!(crds.get_updates_since(0, 1024, &remotes), (0, vec![]));
-        assert_eq!(crds.get_updates_since(0, 0, &remotes), (0, vec![]));
-        assert_eq!(crds.get_updates_since(1, 1024, &remotes), (0, vec![]));
-    }
-    #[test]
-    fn test_updates_real_key() {
-        let key = Keypair::new();
-        let mut crds = Crds::default();
-        let val = CrdsValue::LeaderId(LeaderId {
-            id: key.pubkey(),
-            leader_id: Pubkey::default(),
-            wallclock: 0,
-        });
-        assert_eq!(crds.insert(val.clone(), 1), Ok(None));
-        let mut remotes = IndexMap::new();
-        assert_eq!(
-            crds.get_updates_since(0, 1024, &remotes),
-            (0, vec![(val.clone(), 0)])
-        );
-        remotes.insert(val.label().pubkey(), 1);
-        let sz = serialized_size(&(0, vec![(val.clone(), 1)])).unwrap() as usize;
-        assert_eq!(crds.get_updates_since(0, sz, &remotes), (0, vec![(val, 1)]));
-        assert_eq!(crds.get_updates_since(0, sz - 1, &remotes), (0, vec![]));
-        assert_eq!(crds.get_updates_since(0, 0, &remotes), (0, vec![]));
-        assert_eq!(crds.get_updates_since(1, sz, &remotes), (0, vec![]));
     }
     #[test]
     fn test_equal() {

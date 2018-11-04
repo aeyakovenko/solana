@@ -3,7 +3,7 @@ use hash::Hash;
 use solana_sdk::pubkey::Pubkey;
 
 fn slice_hash(slice: &[u8], hash_index: u64) -> u64 {
-    let len = slice.len(); 
+    let len = slice.len();
     assert!(len < 256);
     let mut rv = 0u64;
     for i in 0..8 {
