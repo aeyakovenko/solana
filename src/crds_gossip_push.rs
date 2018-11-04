@@ -153,14 +153,7 @@ impl CrdsGossipPush {
         network_size: usize,
         ratio: usize,
     ) {
-        trace!(
-            "compute {} {} {}",
-            self.num_active,
-            self.active_set.len(),
-            ratio
-        );
         let need = Self::compute_need(self.num_active, self.active_set.len(), ratio);
-        trace!("need {}", need);
         let mut new_items = HashMap::new();
         let mut ixs: Vec<_> = (0..crds.table.len()).into_iter().collect();
         rand::thread_rng().shuffle(&mut ixs);
