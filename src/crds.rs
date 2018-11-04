@@ -34,10 +34,6 @@ use std::cmp;
 pub struct Crds {
     /// Stores the map of labels and values
     pub table: IndexMap<CrdsValueLabel, VersionedCrdsValue>,
-
-    /// the version of the `table`
-    /// every change to `table` should increase this version number
-    pub version: u64,
 }
 
 #[derive(PartialEq, Debug)]
@@ -55,8 +51,6 @@ pub struct VersionedCrdsValue {
     pub insert_timestamp: u64,
     /// local time when updated
     pub local_timestamp: u64,
-    /// local crds version when added
-    local_version: u64,
     /// value hash
     pub value_hash: Hash,
 }
@@ -75,13 +69,12 @@ impl PartialOrd for VersionedCrdsValue {
     }
 }
 impl VersionedCrdsValue {
-    pub fn new(local_timestamp: u64, version: u64, value: CrdsValue) -> Self {
+    pub fn new(local_timestamp: u64, value: CrdsValue) -> Self {
         let value_hash = hash(&serialize(&value).unwrap());
         VersionedCrdsValue {
             value,
             insert_timestamp: local_timestamp,
             local_timestamp,
-            local_version: version,
             value_hash,
         }
     }
@@ -91,7 +84,6 @@ impl Default for Crds {
     fn default() -> Self {
         Crds {
             table: IndexMap::new(),
-            version: 0,
         }
     }
 }
@@ -99,7 +91,7 @@ impl Default for Crds {
 impl Crds {
     /// must be called atomically with `insert_versioned`
     pub fn new_versioned(&self, local_timestamp: u64, value: CrdsValue) -> VersionedCrdsValue {
-        VersionedCrdsValue::new(local_timestamp, self.version, value)
+        VersionedCrdsValue::new(local_timestamp, value)
     }
     /// insert the new value, returns the old value if insert succeeds
     pub fn insert_versioned(
@@ -114,7 +106,6 @@ impl Crds {
             .map(|current| new_value > *current)
             .unwrap_or(true);
         if do_insert {
-            self.version += 1;
             let old = self.table.insert(label, new_value);
             Ok(old)
         } else {
@@ -214,11 +205,9 @@ mod test {
         let mut crds = Crds::default();
         let val = CrdsValue::LeaderId(LeaderId::default());
         assert_eq!(crds.insert(val.clone(), 0).ok(), Some(None));
-        assert_eq!(crds.version, 1);
         assert_eq!(crds.table.len(), 1);
         assert!(crds.table.contains_key(&val.label()));
         assert_eq!(crds.table[&val.label()].local_timestamp, 0);
-        assert_eq!(crds.table[&val.label()].local_version, crds.version - 1);
     }
     #[test]
     fn test_update_old() {
@@ -227,8 +216,6 @@ mod test {
         assert_eq!(crds.insert(val.clone(), 0), Ok(None));
         assert_eq!(crds.insert(val.clone(), 1), Err(CrdsError::InsertFailed));
         assert_eq!(crds.table[&val.label()].local_timestamp, 0);
-        assert_eq!(crds.table[&val.label()].local_version, crds.version - 1);
-        assert_eq!(crds.version, 1);
     }
     #[test]
     fn test_update_new() {
@@ -245,8 +232,6 @@ mod test {
             original
         );
         assert_eq!(crds.table[&val.label()].local_timestamp, 1);
-        assert_eq!(crds.table[&val.label()].local_version, crds.version - 1);
-        assert_eq!(crds.version, 2);
     }
     #[test]
     fn test_update_timestsamp() {
@@ -304,7 +289,6 @@ mod test {
         let key = Keypair::new();
         let v1 = VersionedCrdsValue::new(
             1,
-            1,
             CrdsValue::LeaderId(LeaderId {
                 id: key.pubkey(),
                 leader_id: Pubkey::default(),
@@ -312,7 +296,6 @@ mod test {
             }),
         );
         let v2 = VersionedCrdsValue::new(
-            1,
             1,
             CrdsValue::LeaderId(LeaderId {
                 id: key.pubkey(),
@@ -328,7 +311,6 @@ mod test {
         let key = Keypair::new();
         let v1 = VersionedCrdsValue::new(
             1,
-            1,
             CrdsValue::LeaderId(LeaderId {
                 id: key.pubkey(),
                 leader_id: Pubkey::default(),
@@ -336,7 +318,6 @@ mod test {
             }),
         );
         let v2 = VersionedCrdsValue::new(
-            1,
             1,
             CrdsValue::LeaderId(LeaderId {
                 id: key.pubkey(),
@@ -357,7 +338,6 @@ mod test {
         let key = Keypair::new();
         let v1 = VersionedCrdsValue::new(
             1,
-            1,
             CrdsValue::LeaderId(LeaderId {
                 id: key.pubkey(),
                 leader_id: Pubkey::default(),
@@ -365,7 +345,6 @@ mod test {
             }),
         );
         let v2 = VersionedCrdsValue::new(
-            1,
             1,
             CrdsValue::LeaderId(LeaderId {
                 id: key.pubkey(),
@@ -382,7 +361,6 @@ mod test {
     fn test_label_order() {
         let v1 = VersionedCrdsValue::new(
             1,
-            1,
             CrdsValue::LeaderId(LeaderId {
                 id: Keypair::new().pubkey(),
                 leader_id: Pubkey::default(),
@@ -390,7 +368,6 @@ mod test {
             }),
         );
         let v2 = VersionedCrdsValue::new(
-            1,
             1,
             CrdsValue::LeaderId(LeaderId {
                 id: Keypair::new().pubkey(),
