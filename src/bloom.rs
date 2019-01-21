@@ -1,8 +1,9 @@
 //! Simple Bloom Filter
 use bv::BitVec;
+use fnv::FnvHasher;
 use rand::{self, Rng};
-use solana_sdk::hash::hashv;
 use std::cmp;
+use std::hash::Hasher;
 use std::marker::PhantomData;
 
 /// Generate a stable hash of `self` for each `hash_index`
@@ -44,8 +45,7 @@ impl<T: BloomHashIndex> Bloom<T> {
         key.hash_at_index(k) % self.bits.len()
     }
     pub fn clear(&mut self) {
-        let len = self.bits.len();
-        self.bits = BitVec::new_fill(false, len);
+        self.bits.clear();
     }
     pub fn add(&mut self, key: &T) {
         for k in &self.keys {
@@ -53,7 +53,7 @@ impl<T: BloomHashIndex> Bloom<T> {
             self.bits.set(pos, true);
         }
     }
-    pub fn contains(&self, key: &T) -> bool {
+    pub fn contains(&mut self, key: &T) -> bool {
         for k in &self.keys {
             let pos = self.pos(key, *k);
             if !self.bits.get(pos) {
@@ -64,33 +64,34 @@ impl<T: BloomHashIndex> Bloom<T> {
     }
 }
 
-fn to_slice(v: u64) -> [u8; 8] {
-    [
-        (v & 0xffu64) as u8,
-        (v >> 1 & 0xffu64) as u8,
-        (v >> 2 & 0xffu64) as u8,
-        (v >> 3 & 0xffu64) as u8,
-        (v >> 4 & 0xffu64) as u8,
-        (v >> 5 & 0xffu64) as u8,
-        (v >> 6 & 0xffu64) as u8,
-        (v >> 7 & 0xffu64) as u8,
-    ]
-}
+//fn to_slice(v: u64) -> [u8; 8] {
+//    [
+//        v as u8,
+//        (v >> 8) as u8,
+//        (v >> 16) as u8,
+//        (v >> 24) as u8,
+//        (v >> 32) as u8,
+//        (v >> 40) as u8,
+//        (v >> 48) as u8,
+//        (v >> 56) as u8,
+//    ]
+//}
 
-fn from_slice(v: &[u8]) -> u64 {
-    (v[0] as u64)
-        | ((v[1] << 1) as u64)
-        | ((v[2] << 2) as u64)
-        | ((v[3] << 3) as u64)
-        | ((v[4] << 4) as u64)
-        | ((v[5] << 5) as u64)
-        | ((v[6] << 6) as u64)
-        | ((v[7] << 7) as u64)
-}
-
+//fn from_slice(v: &[u8]) -> u64 {
+//    u64::from(v[0])
+//        | u64::from(v[1]) << 8
+//        | u64::from(v[2]) << 16
+//        | u64::from(v[3]) << 24
+//        | u64::from(v[4]) << 32
+//        | u64::from(v[5]) << 40
+//        | u64::from(v[6]) << 48
+//        | u64::from(v[7]) << 56
+//}
+//
 fn slice_hash(slice: &[u8], hash_index: u64) -> u64 {
-    let hash = hashv(&[slice, &to_slice(hash_index)]);
-    from_slice(hash.as_ref())
+    let mut hasher = FnvHasher::with_key(hash_index);
+    hasher.write(slice);
+    hasher.finish()
 }
 
 impl<T: AsRef<[u8]>> BloomHashIndex for T {
@@ -103,15 +104,15 @@ impl<T: AsRef<[u8]>> BloomHashIndex for T {
 mod test {
     use super::*;
     use solana_sdk::hash::{hash, Hash};
-    #[test]
-    fn test_slice() {
-        assert_eq!(from_slice(&to_slice(10)), 10);
-        assert_eq!(from_slice(&to_slice(0x7fff7fff)), 0x7fff7fff);
-        assert_eq!(
-            from_slice(&to_slice(0x7fff7fff7fff7fff)),
-            0x7fff7fff7fff7fff
-        );
-    }
+    //    #[test]
+    //    fn test_slice() {
+    //        assert_eq!(from_slice(&to_slice(10)), 10);
+    //        assert_eq!(from_slice(&to_slice(0x7fff7fff)), 0x7fff7fff);
+    //        assert_eq!(
+    //            from_slice(&to_slice(0x7fff7fff7fff7fff)),
+    //            0x7fff7fff7fff7fff
+    //        );
+    //    }
 
     #[test]
     fn test_bloom_filter() {
