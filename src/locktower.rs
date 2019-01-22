@@ -20,9 +20,9 @@ pub struct LockTower {
     /// a reward is generated and the oldest lock is removed.  That fork is considered finalized.
     max_size: usize,
     /// Depth is equal to lockout, since lockout doubles as votes get stacked
-    /// If the requirement is at depth 8, to have converge_amount of 0.667
-    /// Then the lockout will not increase past 256 (2^8) on the fork at depth 8
-    /// without 66.7% total network commitment.
+    /// If the requirement is at depth 8 to have converge_amount of 0.667,
+    /// than the lockout will not increase past 256 (2^8) on the fork at depth 8
+    /// without 66.7% total network commitment to that fork.
     ///
     /// It is not important for the rest of the network to also have the same lockout on the fork.
     /// The worst case is that the lockout for this node will double to 512 due to
