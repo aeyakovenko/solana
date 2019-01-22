@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 pub struct VoteLock {
-    /// Fork id, same as slot id, since there can only be 1 fork per slot, and the empty PoH ticks
+    /// Fork id, same as slot id. There can only be 1 fork per slot, since the empty PoH ticks
     /// cannot be voted on.  A validator cannot vote on a fork unless that fork is connected to
-    /// some base trunk.  
+    /// a trunk. The starting trunk is the initial `finalized_fork`.
     fork: u64,
     /// Lockout is in terms of slots, so the slot height or fork id to unroll this
     /// vote must be greater than fork + lockout.
