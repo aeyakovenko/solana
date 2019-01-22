@@ -30,6 +30,7 @@ impl Forks {
     }
 
     pub fn bank_state(&self, fork: u64) -> BankState {
+        //todo: return an error if checkpionts are empty?
         BankState {
             checkpoints: self
                 .checkpoints
@@ -201,14 +202,16 @@ mod tests {
         forks.trunk_fork().head().finalize();
         assert_eq!(forks.init_fork(1, &last_id, 0), Ok(()));
         assert_eq!(forks.bank_state(1).checkpoints.len(), 2);
+        forks.bank_state(1).head().register_tick(&last_id);
 
         // add a fork 2 to be pruned
         // fork 2 connects to 0
+        let last_id = hash(last_id.as_ref());
         assert_eq!(forks.init_fork(2, &last_id, 0), Ok(()));
         assert_eq!(forks.bank_state(2).checkpoints.len(), 2);
+        forks.bank_state(2).head().register_tick(&last_id);
 
-        forks.live_fork().head().register_tick(&last_id);
-        forks.live_fork().head().finalize();
+        forks.bank_state(1).head().finalize();
         // fork 1 is the new trunk, only forks that are descendant from 1 are valid
         assert_eq!(forks.merge_into_trunk(0, 1), Ok(1));
 
