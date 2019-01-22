@@ -600,6 +600,9 @@ impl BankState {
             .collect();
         StatusCache::has_signature_all(&checkpoints, sig)
     }
+    pub fn checkpoint_depth(&self) -> usize {
+        self.checkpoints.len()
+    }
 }
 
 #[cfg(test)]

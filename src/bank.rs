@@ -1390,42 +1390,45 @@ mod tests {
     //    assert_eq!(bank.checkpoint_depth(), 0);
     //}
 
-    //#[test]
-    //fn test_bank_checkpoint_zero_balance() {
-    //    let alice = Mint::new(1_000);
-    //    let bank = Bank::new(&alice);
-    //    let bob = Keypair::new();
-    //    let charlie = Keypair::new();
+    #[test]
+    fn test_bank_checkpoint_zero_balance() {
+        let alice = Mint::new(1_000);
+        let bank = Bank::new(&alice);
+        let bob = Keypair::new();
+        let charlie = Keypair::new();
 
-    //    // bob should have 500
-    //    bank.transfer(500, &alice.keypair(), bob.pubkey(), alice.last_id())
-    //        .unwrap();
-    //    assert_eq!(bank.get_balance(&bob.pubkey()), 500);
-    //    assert_eq!(bank.checkpoint_depth(), 0);
+        // bob should have 500
+        bank.transfer(500, &alice.keypair(), bob.pubkey(), alice.last_id())
+            .unwrap();
+        assert_eq!(bank.get_balance(&bob.pubkey()), 500);
+        assert_eq!(bank.live_fork().checkpoint_depth(), 1);
 
-    //    let account = bank.get_account(&alice.pubkey()).unwrap();
-    //    let default_account = Account::default();
-    //    assert_eq!(account.userdata, default_account.userdata);
-    //    assert_eq!(account.owner, default_account.owner);
-    //    assert_eq!(account.executable, default_account.executable);
-    //    assert_eq!(account.loader, default_account.loader);
+        let account = bank.get_account(&alice.pubkey()).unwrap();
+        let default_account = Account::default();
+        assert_eq!(account.userdata, default_account.userdata);
+        assert_eq!(account.owner, default_account.owner);
+        assert_eq!(account.executable, default_account.executable);
+        assert_eq!(account.loader, default_account.loader);
 
-    //    bank.checkpoint();
-    //    assert_eq!(bank.checkpoint_depth(), 1);
+        let base = bank.live_fork().head().fork_id();
+        let last_id = hash(alice.last_id());
+        bank.init_fork(base + 1, &alice.last_id(), base);
+        bank.live_fork().head().register_tick(last_id);
+        assert_eq!(bank.live_fork().checkpoint_depth(), 2);
 
-    //    // charlie should have 500, alice should have 0
-    //    bank.transfer(500, &alice.keypair(), charlie.pubkey(), alice.last_id())
-    //        .unwrap();
-    //    assert_eq!(bank.get_balance(&charlie.pubkey()), 500);
-    //    assert_eq!(bank.get_balance(&alice.pubkey()), 0);
+        // charlie should have 500, alice should have 0
+        bank.transfer(500, &alice.keypair(), charlie.pubkey(), alice.last_id())
+            .unwrap();
+        assert_eq!(bank.get_balance(&charlie.pubkey()), 500);
+        assert_eq!(bank.get_balance(&alice.pubkey()), 0);
 
-    //    let account = bank.get_account(&alice.pubkey()).unwrap();
-    //    assert_eq!(account.tokens, default_account.tokens);
-    //    assert_eq!(account.userdata, default_account.userdata);
-    //    assert_eq!(account.owner, default_account.owner);
-    //    assert_eq!(account.executable, default_account.executable);
-    //    assert_eq!(account.loader, default_account.loader);
-    //}
+        let account = bank.get_account(&alice.pubkey()).unwrap();
+        assert_eq!(account.tokens, default_account.tokens);
+        assert_eq!(account.userdata, default_account.userdata);
+        assert_eq!(account.owner, default_account.owner);
+        assert_eq!(account.executable, default_account.executable);
+        assert_eq!(account.loader, default_account.loader);
+    }
 
     //#[test]
     //fn test_bank_checkpoint_rollback() {
