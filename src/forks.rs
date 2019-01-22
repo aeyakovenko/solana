@@ -43,8 +43,9 @@ impl Forks {
     /// Collapse the bottom two checkpoints.
     /// The tree is computed from the `leaf` to the `trunk`
     /// The leaf is the last possible fork, it should have no descendants.
-    /// The expected last fork must be the trunk
-    /// The direct child that leads from the trunk to the leaf becomes the new trunk.
+    /// The expected oldest fork must be the trunk
+    /// The direct child of the trunk that leads the leaf becomes the new trunk.
+    /// The forks that are not a decendant of the new trunk -> leaf path are pruned.
     /// Return the new trunk id.
     pub fn merge_into_trunk(&mut self, trunk: u64, leaf: u64) -> Result<u64> {
         // `old` trunk, should have `trunk` as its fork_id
@@ -158,10 +159,11 @@ mod tests {
             Err(BankError::CheckpointNotFinalized)
         );
         forks.trunk_fork().head().finalize();
-        assert_eq!(forks.live_fork().checkpoints.len(), 2);
         assert_eq!(forks.init_fork(1, &last_id, 0), Ok(()));
+
         assert_eq!(forks.trunk_fork().head().fork_id(), 0);
         assert_eq!(forks.live_fork().head().fork_id(), 1);
+        assert_eq!(forks.live_fork().checkpoints.len(), 2);
     }
 
     #[test]
@@ -175,6 +177,7 @@ mod tests {
         forks.trunk_fork().head().finalize();
         assert_eq!(forks.init_fork(1, &last_id, 0), Ok(()));
         forks.live_fork().head().register_tick(&last_id);
+        forks.live_fork().head().finalize();
         assert_eq!(forks.merge_into_trunk(0, 1), Ok(1));
 
         assert_eq!(forks.live_fork().checkpoints.len(), 1);
