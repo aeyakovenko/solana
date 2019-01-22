@@ -52,7 +52,7 @@ impl Forks {
         // `new` trunk is a direct decendant of old and has new_trunk_id as its fork_id
         // new is merged into old
         // and old is swapped into the checkpoint under new_trunk_id
-        let (old, new, new_trunk_id) = {
+        let (old_trunk, new_trunk, new_trunk_id) = {
             let states = self.checkpoints.collect(ROLLBACK_DEPTH + 1, leaf);
             let leaf_id = states.first().map(|x| x.0).ok_or(BankError::UnknownFork)?;
             assert_eq!(leaf_id, leaf);
@@ -62,35 +62,41 @@ impl Forks {
             }
             let len = states.len();
             let old_trunk = states[len - 1].clone();
-            let merged = states[len - 2].clone();
-            if !merged.1.finalized() {
+            let new_trunk = states[len - 2].clone();
+            if !new_trunk.1.finalized() {
+                println!("new_trunk id {}", new_trunk.1.fork_id());
                 return Err(BankError::CheckpointNotFinalized);
             }
             if !old_trunk.1.finalized() {
+                println!("old id {}", old_trunk.1.fork_id());
                 return Err(BankError::CheckpointNotFinalized);
             }
-            (old_trunk.1.clone(), merged.1.clone(), merged.0)
+            //stupid sanity checks
+            assert_eq!(new_trunk.1.fork_id(), new_trunk.0);
+            assert_eq!(old_trunk.1.fork_id(), old_trunk.0);
+            (old_trunk.1.clone(), new_trunk.1.clone(), new_trunk.0)
         };
         let idag = self.checkpoints.invert();
         let new_checkpoints = self.checkpoints.prune(new_trunk_id, &idag);
-        let old_id = old.fork_id();
+        let old_trunk_id = old_trunk.fork_id();
         self.checkpoints = new_checkpoints;
         self.trunk_fork = new_trunk_id;
         // old should have been pruned
-        assert!(self.checkpoints.load(old_id).is_none());
-        // new id should be in the new tree
+        assert!(self.checkpoints.load(old_trunk_id).is_none());
+        // new_trunk id should be in the new tree
         assert!(!self.checkpoints.load(new_trunk_id).is_none());
 
-        // swap in the old instance under the new id
-        // this should be the last external ref to `new`
-        self.checkpoints.insert(new_trunk_id, old.clone(), old_id);
+        // swap in the old instance under the new_trunk id
+        // this should be the last external ref to `new_trunk`
+        self.checkpoints
+            .insert(new_trunk_id, old_trunk.clone(), old_trunk_id);
 
         // merge all the new changes into the old instance under the new id
         // this should consume `new`
         // new should have no other references
-        let new: BankCheckpoint = Arc::try_unwrap(new).unwrap();
-        old.merge_into_trunk(new);
-        assert_eq!(old.fork_id(), new_trunk_id);
+        let new_trunk: BankCheckpoint = Arc::try_unwrap(new_trunk).unwrap();
+        old_trunk.merge_into_trunk(new_trunk);
+        assert_eq!(old_trunk.fork_id(), new_trunk_id);
         Ok(new_trunk_id)
     }
 
@@ -179,6 +185,35 @@ mod tests {
         forks.live_fork().head().register_tick(&last_id);
         forks.live_fork().head().finalize();
         assert_eq!(forks.merge_into_trunk(0, 1), Ok(1));
+
+        assert_eq!(forks.live_fork().checkpoints.len(), 1);
+        assert_eq!(forks.trunk_fork().head().fork_id(), 1);
+        assert_eq!(forks.live_fork().head().fork_id(), 1);
+    }
+    #[test]
+    fn forks_merge_prune() {
+        let mut forks = Forks::default();
+        let last_id = Hash::default();
+        let cp = BankCheckpoint::new(0, &last_id);
+        cp.register_tick(&last_id);
+        forks.init_trunk_fork(cp);
+        let last_id = hash(last_id.as_ref());
+        forks.trunk_fork().head().finalize();
+        assert_eq!(forks.init_fork(1, &last_id, 0), Ok(()));
+        assert_eq!(forks.bank_state(1).checkpoints.len(), 2);
+
+        // add a fork 2 to be pruned
+        // fork 2 connects to 0
+        assert_eq!(forks.init_fork(2, &last_id, 0), Ok(()));
+        assert_eq!(forks.bank_state(2).checkpoints.len(), 2);
+
+        forks.live_fork().head().register_tick(&last_id);
+        forks.live_fork().head().finalize();
+        // fork 1 is the new trunk, only forks that are descendant from 1 are valid
+        assert_eq!(forks.merge_into_trunk(0, 1), Ok(1));
+
+        // fork 2 is gone since it does not connect to 1
+        assert_eq!(forks.bank_state(2).checkpoints.len(), 0);
 
         assert_eq!(forks.live_fork().checkpoints.len(), 1);
         assert_eq!(forks.trunk_fork().head().fork_id(), 1);
