@@ -47,6 +47,8 @@ impl Forks {
     /// The expected oldest fork must be the trunk
     /// The direct child of the trunk that leads the leaf becomes the new trunk.
     /// The forks that are not a decendant of the new trunk -> leaf path are pruned.
+    /// live_fork is the leaf.
+    /// trunk_fork is the new trunk.
     /// Return the new trunk id.
     pub fn merge_into_trunk(&mut self, trunk: u64, leaf: u64) -> Result<u64> {
         // `old` trunk, should have `trunk` as its fork_id
@@ -82,6 +84,7 @@ impl Forks {
         let old_trunk_id = old_trunk.fork_id();
         self.checkpoints = new_checkpoints;
         self.trunk_fork = new_trunk_id;
+        self.live_fork = leaf;
         // old should have been pruned
         assert!(self.checkpoints.load(old_trunk_id).is_none());
         // new_trunk id should be in the new tree
