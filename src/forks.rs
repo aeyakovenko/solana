@@ -42,6 +42,7 @@ impl Forks {
     }
     /// Collapse the bottom two checkpoints.
     /// The tree is computed from the `leaf` to the `trunk`
+    /// The leaf is the last possible fork, it should have no descendants.
     /// The expected last fork must be the trunk
     /// The direct child that leads from the trunk to the leaf becomes the new trunk.
     /// Return the new trunk id.
@@ -61,6 +62,12 @@ impl Forks {
             let len = states.len();
             let old_trunk = states[len - 1].clone();
             let merged = states[len - 2].clone();
+            if !merged.1.finalized() {
+                return Err(BankError::CheckpointNotFinalized);
+            }
+            if !old_trunk.1.finalized() {
+                return Err(BankError::CheckpointNotFinalized);
+            }
             (old_trunk.1.clone(), merged.1.clone(), merged.0)
         };
         let idag = self.checkpoints.invert();
@@ -108,14 +115,14 @@ impl Forks {
     pub fn init_fork(&mut self, current: u64, last_id: &Hash, base: u64) -> Result<()> {
         if let Some(state) = self.checkpoints.load(base) {
             if !state.0.finalized() {
-                return Err(BankError::BaseCheckpointNotFinalized);
+                return Err(BankError::CheckpointNotFinalized);
             }
             let new = state.0.fork(current, last_id);
             self.checkpoints.store(current, Arc::new(new), base);
             self.live_fork = current;
             Ok(())
         } else {
-            return Err(BankError::BaseCheckpointMissing);
+            return Err(BankError::UnknownFork);
         }
     }
 }
@@ -123,31 +130,55 @@ impl Forks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solana_sdk::hash::hash;
     use crate::bank_state::BankCheckpoint;
+    use solana_sdk::hash::hash;
 
     #[test]
     fn forks_init_trunk() {
-        let mut new = Forks::default();
+        let mut forks = Forks::default();
         let cp = BankCheckpoint::new(0, &Hash::default());
-        new.init_trunk_fork(cp);
-        assert!(new.is_active_fork(0));
-        assert_eq!(new.trunk_fork().checkpoints.len(), 1);
-        assert_eq!(new.trunk_fork().head().fork_id(), 0);
-        assert_eq!(new.live_fork().head().fork_id(), 0);
+        forks.init_trunk_fork(cp);
+        assert!(forks.is_active_fork(0));
+        assert_eq!(forks.trunk_fork().checkpoints.len(), 1);
+        assert_eq!(forks.trunk_fork().head().fork_id(), 0);
+        assert_eq!(forks.live_fork().head().fork_id(), 0);
     }
 
     #[test]
     fn forks_init_fork() {
-        let mut new = Forks::default();
+        let mut forks = Forks::default();
         let last_id = Hash::default();
         let cp = BankCheckpoint::new(0, &last_id);
         cp.register_tick(&last_id);
-        new.init_trunk_fork(cp);
+        forks.init_trunk_fork(cp);
         let last_id = hash(last_id.as_ref());
-        assert_eq!(new.init_fork(1, &last_id, 1), Err(BankError::BaseCheckpointMissing));
-        assert_eq!(new.init_fork(1, &last_id, 0), Err(BankError::BaseCheckpointNotFinalized));
-        new.trunk_fork().head().finalize();
-        assert_eq!(new.init_fork(1, &last_id, 0), Ok(()));
-    } 
+        assert_eq!(forks.init_fork(1, &last_id, 1), Err(BankError::UnknownFork));
+        assert_eq!(
+            forks.init_fork(1, &last_id, 0),
+            Err(BankError::CheckpointNotFinalized)
+        );
+        forks.trunk_fork().head().finalize();
+        assert_eq!(forks.live_fork().checkpoints.len(), 2);
+        assert_eq!(forks.init_fork(1, &last_id, 0), Ok(()));
+        assert_eq!(forks.trunk_fork().head().fork_id(), 0);
+        assert_eq!(forks.live_fork().head().fork_id(), 1);
+    }
+
+    #[test]
+    fn forks_merge() {
+        let mut forks = Forks::default();
+        let last_id = Hash::default();
+        let cp = BankCheckpoint::new(0, &last_id);
+        cp.register_tick(&last_id);
+        forks.init_trunk_fork(cp);
+        let last_id = hash(last_id.as_ref());
+        forks.trunk_fork().head().finalize();
+        assert_eq!(forks.init_fork(1, &last_id, 0), Ok(()));
+        forks.live_fork().head().register_tick(&last_id);
+        assert_eq!(forks.merge_into_trunk(0, 1), Ok(1));
+
+        assert_eq!(forks.live_fork().checkpoints.len(), 1);
+        assert_eq!(forks.trunk_fork().head().fork_id(), 1);
+        assert_eq!(forks.live_fork().head().fork_id(), 1);
+    }
 }

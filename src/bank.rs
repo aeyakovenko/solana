@@ -78,9 +78,8 @@ pub enum BankError {
     //TODO:  move into forks.rs
     UnknownFork,
     InvalidTrunk,
-    BaseCheckpointMissing,
-    BaseCheckpointNotFinalized,
-    CurrentCheckpointIsFinalized,
+    CheckpointNotFinalized,
+    CheckpointIsFinalized,
 }
 
 pub type Result<T> = result::Result<T, BankError>;
