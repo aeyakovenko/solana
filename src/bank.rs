@@ -627,6 +627,7 @@ mod tests {
     use solana_sdk::transaction::Instruction;
     use std;
     use tokio::prelude::{Async, Stream};
+    use solana_sdk::hash::hash;
 
     #[test]
     fn test_bank_new() {
@@ -1411,9 +1412,11 @@ mod tests {
         assert_eq!(account.loader, default_account.loader);
 
         let base = bank.live_fork().head().fork_id();
-        let last_id = hash(alice.last_id());
-        bank.init_fork(base + 1, &alice.last_id(), base);
-        bank.live_fork().head().register_tick(last_id);
+        let last_id = hash(alice.last_id().as_ref());
+        bank.live_fork().head().finalize();
+        assert_eq!(bank.init_fork(base + 1, &alice.last_id(), base), Ok(()));
+        assert_eq!(bank.live_fork().head().fork_id(), base + 1);
+        bank.live_fork().head().register_tick(&last_id);
         assert_eq!(bank.live_fork().checkpoint_depth(), 2);
 
         // charlie should have 500, alice should have 0
