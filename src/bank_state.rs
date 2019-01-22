@@ -80,8 +80,7 @@ impl BankCheckpoint {
     pub fn transaction_count(&self) -> u64 {
         self.accounts.transaction_count()
     }
-
-    fn finalize(&self) {
+    pub fn finalize(&self) {
         self.finalized.store(true, Ordering::Relaxed);
     }
     pub fn finalized(&self) -> bool {

@@ -53,7 +53,7 @@ impl<T: BloomHashIndex> Bloom<T> {
             self.bits.set(pos, true);
         }
     }
-    pub fn contains(&mut self, key: &T) -> bool {
+    pub fn contains(&self, key: &T) -> bool {
         for k in &self.keys {
             let pos = self.pos(key, *k);
             if !self.bits.get(pos) {

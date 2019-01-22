@@ -119,3 +119,35 @@ impl Forks {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solana_sdk::hash::hash;
+    use crate::bank_state::BankCheckpoint;
+
+    #[test]
+    fn forks_init_trunk() {
+        let mut new = Forks::default();
+        let cp = BankCheckpoint::new(0, &Hash::default());
+        new.init_trunk_fork(cp);
+        assert!(new.is_active_fork(0));
+        assert_eq!(new.trunk_fork().checkpoints.len(), 1);
+        assert_eq!(new.trunk_fork().head().fork_id(), 0);
+        assert_eq!(new.live_fork().head().fork_id(), 0);
+    }
+
+    #[test]
+    fn forks_init_fork() {
+        let mut new = Forks::default();
+        let last_id = Hash::default();
+        let cp = BankCheckpoint::new(0, &last_id);
+        cp.register_tick(&last_id);
+        new.init_trunk_fork(cp);
+        let last_id = hash(last_id.as_ref());
+        assert_eq!(new.init_fork(1, &last_id, 1), Err(BankError::BaseCheckpointMissing));
+        assert_eq!(new.init_fork(1, &last_id, 0), Err(BankError::BaseCheckpointNotFinalized));
+        new.trunk_fork().head().finalize();
+        assert_eq!(new.init_fork(1, &last_id, 0), Ok(()));
+    } 
+}
