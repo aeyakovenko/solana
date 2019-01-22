@@ -4,7 +4,7 @@ pub struct VoteLock {
     /// cannot be voted on.  A validator cannot vote on a fork unless that fork is connected to
     /// some base trunk.  
     fork: u64,
-    /// Lockout is in terms of slots, so the slot height and there for the fork id to unroll this
+    /// Lockout is in terms of slots, so the slot height or fork id to unroll this
     /// vote must be greater than fork + lockout.
     lockout: u64,
 }
