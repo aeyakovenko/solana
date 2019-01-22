@@ -26,7 +26,8 @@ pub struct LockTower {
     ///
     /// It is not important for the rest of the network to also have the same lockout on the fork.
     /// The worst case is that the lockout for this node will double to 512 due to
-    /// rollback for the rest of the network.  So any amount of commitment is acceptable.
+    /// rollback for the rest of the network.  So any lockout of network commitment is acceptable,
+    /// but it must cover the required threshold percentage of network stake.
     converge_depth: usize,
     converge_amount: f64,
     /// The last finalized fork.  This value is initialized at the start with some pre-defined
