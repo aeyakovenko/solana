@@ -163,8 +163,10 @@ impl BankCheckpoint {
     fn add_signatures(&self, txs: &[Transaction], results: &[Result<()>]) {
         let mut status_cache = self.status_cache.write().unwrap();
         for (i, tx) in txs.iter().enumerate() {
-            if results[i].is_ok() {
-                status_cache.add(&tx.signatures[0]);
+            match results[i] {
+                Err(BankError::LastIdNotFound) => (),
+                Err(BankError::DuplicateSignature) => (),
+                _ => status_cache.add(&tx.signatures[0]),
             }
         }
     }
@@ -179,9 +181,14 @@ impl BankCheckpoint {
     fn update_transaction_statuses(&self, txs: &[Transaction], res: &[Result<()>]) {
         let mut status_cache = self.status_cache.write().unwrap();
         for (i, tx) in txs.iter().enumerate() {
-            if res[i].is_err() {
-                status_cache.save_failure_status(&tx.signatures[0], res[i].clone().err().unwrap());
+            match res[i] {
+                Ok(_) => (),
+                Err(BankError::LastIdNotFound) => (),
+                Err(BankError::DuplicateSignature) => (),
+                _ => status_cache
+                    .save_failure_status(&tx.signatures[0], res[i].clone().err().unwrap()),
             }
+            if res[i].is_err() {}
         }
     }
     pub fn hash_internal_state(&self) -> Hash {

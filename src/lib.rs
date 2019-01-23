@@ -32,7 +32,6 @@ pub mod crds_value;
 pub mod create_vote_account;
 pub mod forks;
 pub mod last_id_queue;
-pub mod locktower;
 pub mod subscriptions;
 #[macro_use]
 pub mod contact_info;

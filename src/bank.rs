@@ -621,13 +621,13 @@ mod tests {
     use crate::signature::GenKeys;
     use bincode::serialize;
     use hashbrown::HashSet;
+    use solana_sdk::hash::hash;
     use solana_sdk::native_program::ProgramError;
     use solana_sdk::signature::Keypair;
     use solana_sdk::signature::KeypairUtil;
     use solana_sdk::transaction::Instruction;
     use std;
     use tokio::prelude::{Async, Stream};
-    use solana_sdk::hash::hash;
 
     #[test]
     fn test_bank_new() {
