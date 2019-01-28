@@ -6,6 +6,7 @@ use crate::last_id_queue::{LastIdQueue, MAX_ENTRY_IDS};
 use crate::leader_scheduler::TICKS_PER_BLOCK;
 use crate::poh_recorder::PohRecorder;
 use crate::runtime::{self, RuntimeError};
+use crate::sched::Sched;
 use crate::status_cache::StatusCache;
 use log::Level;
 use rayon::prelude::*;
@@ -30,6 +31,9 @@ pub struct BankCheckpoint {
     status_cache: RwLock<StatusCache>,
     finalized: AtomicBool,
     fork_id: AtomicUsize,
+    /// current schedule and next schedule
+    /// These are rotated on BankCheckpoint::merge_into_root
+    sched: RwLock<(Sched, Sched)>,
 }
 
 impl std::fmt::Debug for BankCheckpoint {
@@ -211,12 +215,13 @@ impl BankCheckpoint {
     /// consume the checkpoint into the root state
     /// self becomes the new root and its fork_id is updated
     pub fn merge_into_root(&self, other: Self) {
-        let (accounts, entry_q, status_cache, fork_id) = {
+        let prev_fork_id = self.fork_id();
+        let (accounts, entry_q, status_cache, new_fork_id) = {
             (
                 other.accounts,
                 other.entry_q,
                 other.status_cache,
-                other.fork_id,
+                other.fork_id(),
             )
         };
         self.accounts.merge_into_root(accounts);
@@ -228,8 +233,13 @@ impl BankCheckpoint {
             .write()
             .unwrap()
             .merge_into_root(status_cache.into_inner().unwrap());
-        self.fork_id
-            .store(fork_id.load(Ordering::Relaxed), Ordering::Relaxed);
+        self.fork_id.store(new_fork_id);
+        if Sched::should_regenerate(prev_fork_id, new_fork_id) {
+            let next_sched = Sched::new_schedule(&self);
+            let sched = self.sched.write().unwrap();
+            *sched.0 = sched.1;
+            *sched.1 = next_sched;
+        }
     }
 }
 

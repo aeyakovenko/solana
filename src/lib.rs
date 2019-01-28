@@ -59,6 +59,7 @@ pub mod rpc_mock;
 pub mod rpc_pubsub;
 pub mod rpc_request;
 pub mod runtime;
+pub mod sched;
 pub mod service;
 pub mod signature;
 pub mod sigverify;
