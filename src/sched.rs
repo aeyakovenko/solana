@@ -6,25 +6,26 @@ use std::hash::Hasher;
 
 pub const REFRESH_RATE: u64 = 1000;
 
-struct Sched {
+#[derive(Default, Clone)]
+pub struct Sched {
     min_slot: u64,
     ranks: Vec<(Pubkey, u64)>,
 }
 
 impl Sched {
-    fn should_regenerate(prev_root: u64, new_root: u64) -> bool {
+    pub fn should_regenerate(prev_root: u64, new_root: u64) -> bool {
         prev_root / REFRESH_RATE != new_root / REFRESH_RATE
     }
 
     /// ranked leaders
-    fn new_schedule(root: &BankCheckpoint) -> Sched {
+    pub fn new_schedule(root: &BankCheckpoint) -> Sched {
         let accounts = root.accounts.accounts_db.read().unwrap();
         let leaders: Vec<(Pubkey, u64)> = accounts
             .accounts
             .iter()
             .filter_map(|(id, account)| {
                 if vote_program::check_id(&account.owner) {
-                    return Some((id, account.tokens));
+                    return Some((*id, account.tokens));
                 }
                 None
             })
@@ -48,13 +49,10 @@ impl Sched {
         hasher.write(&slot.to_le_bytes());
         let random = hasher.finish();
         let val = random % total;
-        Some(
-            self.ranks
-                .iter()
-                .skip_while(|l| val < l.1)
-                .nth(0)
-                .unwrap()
-                .0,
-        )
+        self.ranks
+            .iter()
+            .skip_while(|l| val < l.1)
+            .nth(0)
+            .map(|x| x.0)
     }
 }

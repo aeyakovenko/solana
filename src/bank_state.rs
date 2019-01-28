@@ -10,7 +10,6 @@ use crate::sched::Sched;
 use crate::status_cache::StatusCache;
 use log::Level;
 use rayon::prelude::*;
-use solana_native_loader;
 use solana_sdk::account::Account;
 use solana_sdk::hash::Hash;
 use solana_sdk::pubkey::Pubkey;
@@ -51,6 +50,7 @@ impl BankCheckpoint {
             status_cache: RwLock::new(StatusCache::new(last_id)),
             finalized: AtomicBool::new(false),
             fork_id: AtomicUsize::new(fork_id as usize),
+            sched: RwLock::new((Sched::default(), Sched::default())),
         }
     }
     /// Create an Bank using a deposit.
@@ -210,18 +210,19 @@ impl BankCheckpoint {
             status_cache: RwLock::new(StatusCache::new(last_id)),
             finalized: AtomicBool::new(false),
             fork_id: AtomicUsize::new(fork_id as usize),
+            sched: RwLock::new((Sched::default(), Sched::default())),
         }
     }
     /// consume the checkpoint into the root state
     /// self becomes the new root and its fork_id is updated
     pub fn merge_into_root(&self, other: Self) {
         let prev_fork_id = self.fork_id();
-        let (accounts, entry_q, status_cache, new_fork_id) = {
+        let (new_fork_id, accounts, entry_q, status_cache) = {
             (
+                other.fork_id(),
                 other.accounts,
                 other.entry_q,
                 other.status_cache,
-                other.fork_id(),
             )
         };
         self.accounts.merge_into_root(accounts);
@@ -233,12 +234,12 @@ impl BankCheckpoint {
             .write()
             .unwrap()
             .merge_into_root(status_cache.into_inner().unwrap());
-        self.fork_id.store(new_fork_id);
+        self.fork_id.store(new_fork_id as usize, Ordering::Relaxed);
         if Sched::should_regenerate(prev_fork_id, new_fork_id) {
             let next_sched = Sched::new_schedule(&self);
-            let sched = self.sched.write().unwrap();
-            *sched.0 = sched.1;
-            *sched.1 = next_sched;
+            let mut sched = self.sched.write().unwrap();
+            sched.0 = sched.1.clone();
+            sched.1 = next_sched;
         }
     }
 }
