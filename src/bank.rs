@@ -550,7 +550,7 @@ impl Bank {
                     .head()
                     .store_slow(false, &bootstrap_leader_id, &account);
 
-                self.leader_scheduler.write().unwrap().bootstrap_leader = bootstrap_leader_id;
+                self.live_bank_state().head().generate_root_schedule();
 
                 trace!(
                     "applied genesis payment to bootstrap leader {:?} => {:?}",
@@ -632,11 +632,10 @@ impl Bank {
             .store(confirmation, Ordering::Relaxed);
     }
 
-    pub fn get_current_leader(&self) -> Option<(Pubkey, u64)> {
-        self.leader_scheduler
-            .read()
-            .unwrap()
-            .get_scheduled_leader(self.tick_height() + 1)
+    pub fn get_current_leader(&self) -> Option<Pubkey> {
+        //TODO: "current" needs to be more specific, tpu, or specific slot
+        let id = self.live_bank_state().head().fork_id();
+        self.root_bank_state().head().compute_node(id)
     }
 }
 

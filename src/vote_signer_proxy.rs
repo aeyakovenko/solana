@@ -113,7 +113,7 @@ impl VoteSignerProxy {
         vote_blob_sender: &BlobSender,
     ) -> Result<()> {
         {
-            let (leader, _) = bank.get_current_leader().unwrap();
+            let leader = bank.get_current_leader().unwrap();
 
             let mut old_leader = self.last_leader.write().unwrap();
 
@@ -188,7 +188,7 @@ impl VoteSignerProxy {
 
     fn get_leader_tpu(bank: &Bank, cluster_info: &Arc<RwLock<ClusterInfo>>) -> Result<SocketAddr> {
         let leader_id = match bank.get_current_leader() {
-            Some((leader_id, _)) => leader_id,
+            Some(leader_id) => leader_id,
             None => return Err(Error::VoteError(VoteError::NoLeader)),
         };
 

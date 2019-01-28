@@ -16,9 +16,8 @@ impl Sched {
     pub fn should_regenerate(prev_root: u64, new_root: u64) -> bool {
         prev_root / REFRESH_RATE != new_root / REFRESH_RATE
     }
-
     /// ranked leaders
-    pub fn new_schedule(root: &BankCheckpoint) -> Sched {
+    fn new(root: &BankCheckpoint, min_slot: u64) -> Sched {
         let accounts = root.accounts.accounts_db.read().unwrap();
         let leaders: Vec<(Pubkey, u64)> = accounts
             .accounts
@@ -35,11 +34,18 @@ impl Sched {
             .into_iter()
             .scan(start, |z, x| Some((x.0, z.1 + x.1)))
             .collect();
-        let min_slot = ((root.fork_id() + REFRESH_RATE) / REFRESH_RATE) * REFRESH_RATE;
         Sched { ranks, min_slot }
     }
+    /// ranked leaders
+    pub fn new_schedule(root: &BankCheckpoint) -> Sched {
+        let min_slot = ((root.fork_id() + REFRESH_RATE) / REFRESH_RATE) * REFRESH_RATE;
+        Self::new(root, min_slot)
+    }
+    pub fn new_root_schedule(root: &BankCheckpoint) -> Sched {
+        Self::new(root, 0)
+    }
 
-    fn compute_node(&self, slot: u64) -> Option<Pubkey> {
+    pub fn compute_node(&self, slot: u64) -> Option<Pubkey> {
         if slot < self.min_slot {
             return None;
         }

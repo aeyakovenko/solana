@@ -242,6 +242,14 @@ impl BankCheckpoint {
             sched.1 = next_sched;
         }
     }
+    pub fn generate_root_schedule(&self) {
+        let mut sched = self.sched.write().unwrap();
+        sched.0 = Sched::new_root_schedule(&self);
+        sched.1 = Sched::new_schedule(&self);
+    }
+    pub fn compute_node(&self, slot: u64) -> Option<Pubkey> {
+        self.sched.read().unwrap().0.compute_node(slot)
+    }
 }
 
 pub struct BankState {

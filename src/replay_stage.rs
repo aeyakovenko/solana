@@ -121,7 +121,7 @@ impl ReplayStage {
             duration_as_ms(&now.elapsed()) as usize
         );
 
-        let (current_leader, _) = bank
+        let current_leader = bank
             .get_current_leader()
             .expect("Scheduled leader should be calculated by this point");
 
@@ -157,7 +157,7 @@ impl ReplayStage {
                 ledger_entry_sender.send(entries)?;
             }
             *entry_height += entries_len;
-            let (scheduled_leader, _) = bank
+            let scheduled_leader = bank
                 .get_current_leader()
                 .expect("Scheduled leader should be calculated by this point");
 
@@ -243,7 +243,7 @@ impl ReplayStage {
                 let mut entry_height_ = entry_height;
                 let mut last_entry_id = last_entry_id;
                 loop {
-                    let (leader_id, _) = bank
+                    let leader_id = bank
                         .get_current_leader()
                         .expect("Scheduled leader should be calculated by this point");
 

@@ -269,7 +269,7 @@ impl Fullnode {
         }
 
         // Get the scheduled leader
-        let (scheduled_leader, _) = bank
+        let scheduled_leader = bank
             .get_current_leader()
             .expect("Leader not known after processing bank");
 
@@ -397,7 +397,7 @@ impl Fullnode {
             );
 
             let new_bank = Arc::new(new_bank);
-            let (scheduled_leader, _) = new_bank
+            let scheduled_leader = new_bank
                 .get_current_leader()
                 .expect("Scheduled leader id should be calculated after rebuilding bank");
 
