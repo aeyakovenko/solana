@@ -51,29 +51,34 @@ pub struct VersionedCrdsValue {
     pub insert_timestamp: u64,
     /// local time when updated
     pub local_timestamp: u64,
-    /// value hash
-    pub value_hash: Hash,
 }
-
-impl PartialOrd for VersionedCrdsValue {
-    fn partial_cmp(&self, other: &VersionedCrdsValue) -> Option<cmp::Ordering> {
+enum MergeResult {
+    Left,
+    Right,
+    Merge
+}
+trait RecursiveMerge {
+    fn check(&self, other: &Self) -> MergeResult;
+    fn merge(&mut self, other: Self);
+}
+impl RecursiveMerge for VersionedCrdsValue {
+    fn check(&self, other: &Self) -> MergeResult {
         if self.value.label() != other.value.label() {
-            None
-        } else if self.value.wallclock() == other.value.wallclock() {
-            Some(self.value_hash.cmp(&other.value_hash))
+            Left
         } else {
-            Some(self.value.wallclock().cmp(&other.value.wallclock()))
+            self.value.check(&other.value)
         }
+    }
+    fn merge(&mut self, other: Self) {
+        self.value.check(other.value)
     }
 }
 impl VersionedCrdsValue {
     pub fn new(local_timestamp: u64, value: CrdsValue) -> Self {
-        let value_hash = hash(&serialize(&value).unwrap());
         VersionedCrdsValue {
             value,
             insert_timestamp: local_timestamp,
             local_timestamp,
-            value_hash,
         }
     }
 }
