@@ -7,7 +7,8 @@ use rayon::prelude::*;
 use solana::banking_stage::BankingStage;
 use solana::entry::Entry;
 use solana::packet::to_packets_chunked;
-use solana::poh_service::PohServiceConfig;
+use solana::poh_recorder::{PohRecorder, WorkingBank};
+use solana::poh_service::{PohService, PohServiceConfig};
 use solana_runtime::bank::Bank;
 use solana_sdk::genesis_block::GenesisBlock;
 use solana_sdk::hash::hash;
@@ -16,7 +17,8 @@ use solana_sdk::signature::{KeypairUtil, Signature};
 use solana_sdk::system_transaction::SystemTransaction;
 use solana_sdk::timing::MAX_ENTRY_IDS;
 use std::iter;
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 use test::Bencher;
@@ -37,6 +39,17 @@ fn check_txs(receiver: &Receiver<Vec<Entry>>, ref_tx_count: usize) {
         }
     }
     assert_eq!(total, ref_tx_count);
+}
+
+fn test_recorder(bank: &Arc<Bank>) -> (PohRecorder, Sender<WorkingBank>) {
+    let exit = Arc::new(AtomicBool::new(false));
+    let poh_recorder = PohRecorder::new(bank.tick_height(), bank.last_id());
+    let (_poh_service, working_bank_sender) = PohService::new(
+        poh_recorder.clone(),
+        PohServiceConfig::default(),
+        exit.clone(),
+    );
+    (poh_recorder, working_bank_sender)
 }
 
 #[bench]
@@ -100,11 +113,12 @@ fn bench_banking_stage_multi_accounts(bencher: &mut Bencher) {
             (x, iter::repeat(1).take(len).collect())
         })
         .collect();
+    let (poh_recorder, working_bank_sender) = test_recorder(&bank);
     let (_stage, signal_receiver) = BankingStage::new(
         &bank,
+        &poh_recorder,
+        working_bank_sender,
         verified_receiver,
-        PohServiceConfig::default(),
-        &genesis_block.last_id(),
         std::u64::MAX,
         genesis_block.bootstrap_leader_id,
     );
@@ -207,11 +221,12 @@ fn bench_banking_stage_multi_programs(bencher: &mut Bencher) {
             (x, iter::repeat(1).take(len).collect())
         })
         .collect();
+    let (poh_recorder, working_bank_sender) = test_recorder(&bank);
     let (_stage, signal_receiver) = BankingStage::new(
         &bank,
+        &poh_recorder,
+        working_bank_sender,
         verified_receiver,
-        PohServiceConfig::default(),
-        &genesis_block.last_id(),
         std::u64::MAX,
         genesis_block.bootstrap_leader_id,
     );

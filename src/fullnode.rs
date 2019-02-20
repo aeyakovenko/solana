@@ -6,7 +6,8 @@ use crate::blocktree_processor;
 use crate::cluster_info::{ClusterInfo, Node, NodeInfo};
 use crate::gossip_service::GossipService;
 use crate::leader_scheduler::{LeaderScheduler, LeaderSchedulerConfig};
-use crate::poh_service::PohServiceConfig;
+use crate::poh_recorder::{PohRecorder, WorkingBank};
+use crate::poh_service::{PohService, PohServiceConfig};
 use crate::rpc_pubsub_service::PubSubService;
 use crate::rpc_service::JsonRpcService;
 use crate::rpc_subscriptions::RpcSubscriptions;
@@ -108,6 +109,9 @@ pub struct Fullnode {
     rotation_receiver: TpuRotationReceiver,
     blocktree: Arc<Blocktree>,
     leader_scheduler: Arc<RwLock<LeaderScheduler>>,
+    poh_service: PohService,
+    poh_recorder: PohRecorder,
+    working_bank_sender: Sender<WorkingBank>,
 }
 
 impl Fullnode {
@@ -130,6 +134,12 @@ impl Fullnode {
         let (bank, entry_height, last_entry_id, blocktree, ledger_signal_receiver) =
             new_bank_from_ledger(ledger_path, &config.ledger_config(), &leader_scheduler);
 
+        let exit = Arc::new(AtomicBool::new(false));
+        info!("starting PoH... {} {}", bank.tick_height(), last_entry_id);
+        let poh_recorder = PohRecorder::new(bank.tick_height(), last_entry_id);
+        let (poh_service, working_bank_sender) =
+            PohService::new(poh_recorder.clone(), config.tick_config, exit.clone());
+
         info!("node info: {:?}", node.info);
         info!("node entrypoint_info: {:?}", entrypoint_info_option);
         info!(
@@ -137,7 +147,6 @@ impl Fullnode {
             node.sockets.gossip.local_addr().unwrap()
         );
 
-        let exit = Arc::new(AtomicBool::new(false));
         let blocktree = Arc::new(blocktree);
 
         node.info.wallclock = timestamp();
@@ -284,14 +293,12 @@ impl Fullnode {
             rotation_receiver,
             blocktree,
             leader_scheduler,
+            poh_service,
+            poh_recorder,
+            working_bank_sender,
         };
 
-        fullnode.rotate(
-            scheduled_leader,
-            max_tick_height,
-            blob_index,
-            &last_entry_id,
-        );
+        fullnode.rotate(scheduled_leader, max_tick_height, blob_index);
         inc_new_counter_info!("fullnode-new", 1);
         fullnode
     }
@@ -342,7 +349,6 @@ impl Fullnode {
         next_leader: Pubkey,
         max_tick_height: u64,
         blob_index: u64,
-        last_entry_id: &Hash,
     ) -> FullnodeReturnType {
         if next_leader == self.id {
             let transition = match self.node_services.tpu.is_leader() {
@@ -360,7 +366,8 @@ impl Fullnode {
             let tpu_bank = Arc::new(Bank::new_from_parent(&self.bank));
             self.node_services.tpu.switch_to_leader(
                 &tpu_bank,
-                PohServiceConfig::default(),
+                &self.poh_recorder,
+                self.working_bank_sender.clone(),
                 self.tpu_sockets
                     .iter()
                     .map(|s| s.try_clone().expect("Failed to clone TPU sockets"))
@@ -371,7 +378,6 @@ impl Fullnode {
                 self.sigverify_disabled,
                 max_tick_height,
                 blob_index,
-                last_entry_id,
                 &self.blocktree,
                 &self.leader_scheduler,
             );
@@ -410,8 +416,7 @@ impl Fullnode {
                 Ok(tick_height) => {
                     trace!("{:?}: rotate at tick_height={}", self.id, tick_height);
                     let (next_leader, max_tick_height) = self.get_next_leader(tick_height);
-                    let transition =
-                        self.rotate(next_leader, max_tick_height, 0, &self.bank.last_id());
+                    let transition = self.rotate(next_leader, max_tick_height, 0);
                     debug!("role transition complete: {:?}", transition);
                     if let Some(ref rotation_notifier) = rotation_notifier {
                         rotation_notifier
@@ -439,7 +444,8 @@ impl Fullnode {
         if let Some(ref rpc_pubsub_service) = self.rpc_pubsub_service {
             rpc_pubsub_service.exit();
         }
-        self.node_services.exit()
+        self.node_services.exit();
+        self.poh_service.exit()
     }
 
     pub fn close(self) -> Result<()> {
@@ -503,6 +509,7 @@ impl Service for Fullnode {
 
         self.gossip_service.join()?;
         self.node_services.join()?;
+        let _ = self.poh_service.join()?;
         Ok(())
     }
 }

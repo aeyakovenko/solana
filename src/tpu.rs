@@ -8,12 +8,11 @@ use crate::cluster_info::ClusterInfo;
 use crate::cluster_info_vote_listener::ClusterInfoVoteListener;
 use crate::fetch_stage::FetchStage;
 use crate::leader_scheduler::LeaderScheduler;
-use crate::poh_service::PohServiceConfig;
+use crate::poh_recorder::{PohRecorder, WorkingBank};
 use crate::service::Service;
 use crate::sigverify_stage::SigVerifyStage;
 use crate::tpu_forwarder::TpuForwarder;
 use solana_runtime::bank::Bank;
-use solana_sdk::hash::Hash;
 use solana_sdk::pubkey::Pubkey;
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -196,13 +195,13 @@ impl Tpu {
     pub fn switch_to_leader(
         &mut self,
         bank: &Arc<Bank>,
-        tick_duration: PohServiceConfig,
+        poh_recorder: &PohRecorder,
+        working_leader_sender: Sender<WorkingBank>,
         transactions_sockets: Vec<UdpSocket>,
         broadcast_socket: UdpSocket,
         sigverify_disabled: bool,
         max_tick_height: u64,
         blob_index: u64,
-        last_entry_id: &Hash,
         blocktree: &Arc<Blocktree>,
         leader_scheduler: &Arc<RwLock<LeaderScheduler>>,
     ) {
@@ -227,10 +226,10 @@ impl Tpu {
             SigVerifyStage::new(packet_receiver, sigverify_disabled);
 
         let (banking_stage, entry_receiver) = BankingStage::new(
-            &bank,
+            bank,
+            poh_recorder,
+            working_leader_sender,
             verified_receiver,
-            tick_duration,
-            last_entry_id,
             max_tick_height,
             self.id,
         );
