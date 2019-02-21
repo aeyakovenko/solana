@@ -28,7 +28,7 @@ pub struct WorkingBank {
 #[derive(Clone)]
 pub struct PohRecorder {
     poh: Arc<Mutex<Poh>>,
-    tick_cache: Arc<Mutex<Vec<Entry>>>,
+    tick_cache: Arc<Mutex<Vec<(Entry, u64)>>>,
 }
 
 impl PohRecorder {
@@ -41,14 +41,19 @@ impl PohRecorder {
     }
 
     fn flush_cache(&self, working_bank: &WorkingBank) -> Result<()> {
-        let mut cache = vec![];
-        std::mem::swap(&mut cache, &mut self.tick_cache.lock().unwrap());
+        let cache: Vec<(Entry, u64)> = {
+            let mut tick_cache = self.tick_cache.lock().unwrap();
+            let sz = tick_cache.iter().take_while(|t| t.1 < working_bank.max_tick_height).count();
+            tick_cache.drain(..sz).collect()
+        };
         if !cache.is_empty() {
             trace!("flush_cache: {} {} {}", working_bank.bank.tick_height(), cache.len(), working_bank.max_tick_height);
             for t in &cache {
-                working_bank.bank.register_tick(&t.id);
+                trace!("register_tick: {} {} {}", t.1, working_bank.bank.tick_height(), working_bank.max_tick_height);
+                working_bank.bank.register_tick(&t.0.id);
             }
-            working_bank.sender.send(cache)?;
+            let entries: Vec<Entry> = cache.into_iter().map(|t| t.0).collect();
+            working_bank.sender.send(entries)?;
         }
         Ok(())
     }
@@ -70,8 +75,8 @@ impl PohRecorder {
         };
         result.map_err(|e| {
             let tick = Self::generate_tick(&mut poh);
+            trace!("generated cached tick {}", tick.1);
             self.tick_cache.lock().unwrap().push(tick);
-            trace!("generated cached tick {}", self.tick_cache.lock().unwrap().len());
             e
         })
     }
@@ -130,17 +135,17 @@ impl PohRecorder {
         Ok(())
     }
 
-    fn generate_tick(poh: &mut Poh) -> Entry {
+    fn generate_tick(poh: &mut Poh) -> (Entry, u64) {
         let tick = poh.tick();
-        Entry {
+        (Entry {
             num_hashes: tick.num_hashes,
             id: tick.id,
             transactions: vec![],
-        }
+        }, tick.tick_height)
     }
 
     fn register_and_send_tick(poh: &mut Poh, working_bank: &WorkingBank) -> Result<()> {
-        let tick = Self::generate_tick(poh);
+        let (tick, _) = Self::generate_tick(poh);
         working_bank.bank.register_tick(&tick.id);
         working_bank.sender.send(vec![tick])?;
         Ok(())
