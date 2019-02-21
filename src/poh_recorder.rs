@@ -44,6 +44,7 @@ impl PohRecorder {
         let mut cache = vec![];
         std::mem::swap(&mut cache, &mut self.tick_cache.lock().unwrap());
         if !cache.is_empty() {
+            trace!("flush_cache: {} {} {}", working_bank.bank.tick_height(), cache.len(), working_bank.max_tick_height);
             for t in &cache {
                 working_bank.bank.register_tick(&t.id);
             }
@@ -51,22 +52,28 @@ impl PohRecorder {
         }
         Ok(())
     }
-
-    pub fn tick(&self, working_bank: &WorkingBank) -> Result<()> {
+    fn tick_working_bank(&self, poh: &mut Poh , working_bank: &WorkingBank) -> Result<()> {
+        Self::check_tick_height(&poh, working_bank)?;
+        self.flush_cache(working_bank)?;
+        Self::register_and_send_tick(&mut *poh, working_bank)   
+    }
+    pub fn tick(&self, working_bank: Option<&WorkingBank>) -> Result<()> {
         // Register and send the entry out while holding the lock if the max PoH height
         // hasn't been reached.
         // This guarantees PoH order and Entry production and banks LastId queue is the same
         let mut poh = self.poh.lock().unwrap();
 
-        Self::check_tick_height(&poh, working_bank).map_err(|e| {
+        let result = if let Some(working_bank) = working_bank {
+            self.tick_working_bank(&mut poh, working_bank)
+        } else {
+            Ok(())
+        };
+        result.map_err(|e| {
             let tick = Self::generate_tick(&mut poh);
             self.tick_cache.lock().unwrap().push(tick);
+            trace!("generated cached tick {}", self.tick_cache.lock().unwrap().len());
             e
-        })?;
-                                                      ;
-        self.flush_cache(working_bank)?;
-
-        Self::register_and_send_tick(&mut *poh, working_bank)
+        })
     }
 
     pub fn record(
@@ -173,19 +180,19 @@ mod tests {
         //get some events
         let _e = entry_receiver.recv().unwrap();
 
-        poh_recorder.tick(&working_bank).unwrap();
+        poh_recorder.tick(Some(&working_bank)).unwrap();
         let _e = entry_receiver.recv().unwrap();
 
-        poh_recorder.tick(&working_bank).unwrap();
+        poh_recorder.tick(Some(&working_bank)).unwrap();
         let _e = entry_receiver.recv().unwrap();
 
         // max tick height reached
-        assert!(poh_recorder.tick(&working_bank).is_err());
+        assert!(poh_recorder.tick(Some(&working_bank)).is_err());
         assert!(poh_recorder.record(h1, vec![tx], &working_bank).is_err());
 
         //make sure it handles channel close correctly
         drop(entry_receiver);
-        assert!(poh_recorder.tick(&working_bank).is_err());
+        assert!(poh_recorder.tick(Some(&working_bank)).is_err());
     }
 
     #[test]
@@ -204,11 +211,11 @@ mod tests {
         };
 
         // tick should be cached
-        assert!(poh_recorder.tick(&working_bank).is_err());
+        assert!(poh_recorder.tick(Some(&working_bank)).is_err());
         assert!(entry_receiver.try_recv().is_err());
 
         // working_bank should be at the right height
-        poh_recorder.tick(&working_bank).unwrap();
+        poh_recorder.tick(Some(&working_bank)).unwrap();
 
         let entries = entry_receiver.recv().unwrap();
         assert_eq!(entries.len(), 1);
@@ -233,7 +240,7 @@ mod tests {
 
         // tick should be cached
         assert_matches!(
-            poh_recorder.tick(&working_bank),
+            poh_recorder.tick(Some(&working_bank)),
             Err(Error::PohRecorderError(
                 PohRecorderError::MinHeightNotReached
             ))
@@ -241,7 +248,7 @@ mod tests {
 
         // working_bank should be past MaxHeight
         assert_matches!(
-            poh_recorder.tick(&working_bank),
+            poh_recorder.tick(Some(&working_bank)),
             Err(Error::PohRecorderError(PohRecorderError::MaxHeightReached))
         );
         assert_eq!(poh_recorder.tick_cache.lock().unwrap().len(), 2);

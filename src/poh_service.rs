@@ -104,11 +104,7 @@ impl PohService {
                     sleep(duration);
                 }
             }
-            let result = if let Some(ref current_leader) = working_bank {
-                poh.tick(current_leader)
-            } else {
-                Ok(())
-            };
+            let result = poh.tick(working_bank.as_ref());
             match result {
                 Err(Error::PohRecorderError(PohRecorderError::MinHeightNotReached)) => (),
                 Err(Error::PohRecorderError(PohRecorderError::MaxHeightReached)) => {

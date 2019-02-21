@@ -105,6 +105,7 @@ impl Broadcast {
 
         inc_new_counter_info!("streamer-broadcast-sent", blobs.len());
 
+        trace!("ticks: {} {} {}", self.tick_height, ticks, self.max_tick_height);
         assert!(self.tick_height + ticks <= self.max_tick_height);
         self.tick_height += ticks;
         let contains_last_tick = self.tick_height == self.max_tick_height;

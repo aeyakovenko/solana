@@ -673,7 +673,7 @@ mod tests {
 
         BankingStage::process_and_record_transactions(&transactions, &poh_recorder, &working_bank)
             .unwrap();
-        poh_recorder.tick(&working_bank).unwrap();
+        poh_recorder.tick(Some(&working_bank)).unwrap();
 
         let mut need_tick = true;
         // read entries until I find mine, might be ticks...
