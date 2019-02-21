@@ -355,7 +355,7 @@ mod tests {
     use solana_sdk::timing::DEFAULT_TICKS_PER_SLOT;
     use std::thread::sleep;
 
-    fn test_recorder(bank: &Arc<Bank>) -> (PohRecorder, Sender<WorkingBank>) {
+    fn create_test_recorder(bank: &Arc<Bank>) -> (PohRecorder, Sender<WorkingBank>) {
         let exit = Arc::new(AtomicBool::new(false));
         let poh_recorder = PohRecorder::new(bank.tick_height(), bank.last_id());
         let (_poh_service, working_bank_sender) = PohService::new(
@@ -371,7 +371,7 @@ mod tests {
         let (genesis_block, _mint_keypair) = GenesisBlock::new(2);
         let bank = Arc::new(Bank::new(&genesis_block));
         let (verified_sender, verified_receiver) = channel();
-        let (poh_recorder, working_bank_sender) = test_recorder(&bank);
+        let (poh_recorder, working_bank_sender) = create_test_recorder(&bank);
         let (banking_stage, _entry_receiver) = BankingStage::new(
             &bank,
             &poh_recorder,
@@ -390,7 +390,7 @@ mod tests {
         let bank = Arc::new(Bank::new(&genesis_block));
         let start_hash = bank.last_id();
         let (verified_sender, verified_receiver) = channel();
-        let (poh_recorder, working_bank_sender) = test_recorder(&bank);
+        let (poh_recorder, working_bank_sender) = create_test_recorder(&bank);
         let (banking_stage, entry_receiver) = BankingStage::new(
             &bank,
             &poh_recorder,
@@ -415,7 +415,7 @@ mod tests {
         let bank = Arc::new(Bank::new(&genesis_block));
         let start_hash = bank.last_id();
         let (verified_sender, verified_receiver) = channel();
-        let (poh_recorder, working_bank_sender) = test_recorder(&bank);
+        let (poh_recorder, working_bank_sender) = create_test_recorder(&bank);
         let (banking_stage, entry_receiver) = BankingStage::new(
             &bank,
             &poh_recorder,
@@ -469,7 +469,7 @@ mod tests {
         let (genesis_block, mint_keypair) = GenesisBlock::new(2);
         let bank = Arc::new(Bank::new(&genesis_block));
         let (verified_sender, verified_receiver) = channel();
-        let (poh_recorder, working_bank_sender) = test_recorder(&bank);
+        let (poh_recorder, working_bank_sender) = create_test_recorder(&bank);
         let (banking_stage, entry_receiver) = BankingStage::new(
             &bank,
             &poh_recorder,
@@ -533,7 +533,7 @@ mod tests {
         let bank = Arc::new(Bank::new(&genesis_block));
         let (verified_sender, verified_receiver) = channel();
         let max_tick_height = 10;
-        let (poh_recorder, working_bank_sender) = test_recorder(&bank);
+        let (poh_recorder, working_bank_sender) = create_test_recorder(&bank);
         let (banking_stage, _entry_receiver) = BankingStage::new(
             &bank,
             &poh_recorder,
@@ -562,7 +562,7 @@ mod tests {
         let bank = Arc::new(Bank::new(&genesis_block));
         let ticks_per_slot = 1;
         let (verified_sender, verified_receiver) = channel();
-        let (poh_recorder, working_bank_sender) = test_recorder(&bank);
+        let (poh_recorder, working_bank_sender) = create_test_recorder(&bank);
         let (mut banking_stage, _entry_receiver) = BankingStage::new(
             &bank,
             &poh_recorder,

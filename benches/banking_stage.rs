@@ -41,7 +41,7 @@ fn check_txs(receiver: &Receiver<Vec<Entry>>, ref_tx_count: usize) {
     assert_eq!(total, ref_tx_count);
 }
 
-fn test_recorder(bank: &Arc<Bank>) -> (PohRecorder, Sender<WorkingBank>) {
+fn create_test_recorder(bank: &Arc<Bank>) -> (PohRecorder, Sender<WorkingBank>) {
     let exit = Arc::new(AtomicBool::new(false));
     let poh_recorder = PohRecorder::new(bank.tick_height(), bank.last_id());
     let (_poh_service, working_bank_sender) = PohService::new(
@@ -113,7 +113,7 @@ fn bench_banking_stage_multi_accounts(bencher: &mut Bencher) {
             (x, iter::repeat(1).take(len).collect())
         })
         .collect();
-    let (poh_recorder, working_bank_sender) = test_recorder(&bank);
+    let (poh_recorder, working_bank_sender) = create_test_recorder(&bank);
     let (_stage, signal_receiver) = BankingStage::new(
         &bank,
         &poh_recorder,
@@ -221,7 +221,7 @@ fn bench_banking_stage_multi_programs(bencher: &mut Bencher) {
             (x, iter::repeat(1).take(len).collect())
         })
         .collect();
-    let (poh_recorder, working_bank_sender) = test_recorder(&bank);
+    let (poh_recorder, working_bank_sender) = create_test_recorder(&bank);
     let (_stage, signal_receiver) = BankingStage::new(
         &bank,
         &poh_recorder,
