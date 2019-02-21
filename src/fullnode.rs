@@ -364,6 +364,10 @@ impl Fullnode {
                 None => FullnodeReturnType::LeaderToLeaderRotation, // value doesn't matter here...
             };
             let tpu_bank = Arc::new(Bank::new_from_parent(&self.bank));
+
+            //TODO: this will be called by the TVU every time it votes
+            //instead of here
+            self.poh_recorder.reset(&tpu_bank);
             self.node_services.tpu.switch_to_leader(
                 &tpu_bank,
                 &self.poh_recorder,

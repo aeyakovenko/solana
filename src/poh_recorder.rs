@@ -28,7 +28,7 @@ pub struct WorkingBank {
 #[derive(Clone)]
 pub struct PohRecorder {
     poh: Arc<Mutex<Poh>>,
-    tick_cache: Arc<Mutex<Vec<(Entry, u64)>>>,
+    tick_cache: Arc<Mutex<Vec<Entry>>>,
 }
 
 impl PohRecorder {
@@ -40,28 +40,42 @@ impl PohRecorder {
         poh.hash();
     }
 
+    // synchronize PoH with a bank
+    pub fn reset(&self, bank: &Bank) {
+        let mut poh = self.poh.lock().unwrap();
+        let mut cache = vec![];
+        trace!("reset poh from: {},{} to: {},{}", poh.id, poh.tick_height, bank.last_id(),bank.tick_height());
+        std::mem::swap(&mut cache, &mut self.tick_cache.lock().unwrap());
+        *poh = Poh::new(bank.last_id(), bank.tick_height());
+    }
+
     fn flush_cache(&self, working_bank: &WorkingBank) -> Result<()> {
-        let cache: Vec<(Entry, u64)> = {
-            let mut tick_cache = self.tick_cache.lock().unwrap();
-            let sz = tick_cache.iter().take_while(|t| t.1 < working_bank.max_tick_height).count();
-            tick_cache.drain(..sz).collect()
-        };
+        // check_tick_height is called before flush cache, so it cannot overrun the bank
+        // so a bank that is so late that it's slot fully generated before it starts recording
+        // will fail instead of broadcasting any ticks
+        let mut cache = vec![];
+        std::mem::swap(&mut cache, &mut self.tick_cache.lock().unwrap());
         if !cache.is_empty() {
-            trace!("flush_cache: {} {} {}", working_bank.bank.tick_height(), cache.len(), working_bank.max_tick_height);
+            trace!(
+                "flush_cache: {} {} {}",
+                working_bank.bank.tick_height(),
+                cache.len(),
+                working_bank.max_tick_height
+            );
             for t in &cache {
-                trace!("register_tick: {} {} {}", t.1, working_bank.bank.tick_height(), working_bank.max_tick_height);
-                working_bank.bank.register_tick(&t.0.id);
+                working_bank.bank.register_tick(&t.id);
             }
-            let entries: Vec<Entry> = cache.into_iter().map(|t| t.0).collect();
-            working_bank.sender.send(entries)?;
+            working_bank.sender.send(cache)?;
         }
         Ok(())
     }
-    fn tick_working_bank(&self, poh: &mut Poh , working_bank: &WorkingBank) -> Result<()> {
+
+    fn tick_working_bank(&self, poh: &mut Poh, working_bank: &WorkingBank) -> Result<()> {
         Self::check_tick_height(&poh, working_bank)?;
         self.flush_cache(working_bank)?;
-        Self::register_and_send_tick(&mut *poh, working_bank)   
+        Self::register_and_send_tick(&mut *poh, working_bank)
     }
+
     pub fn tick(&self, working_bank: Option<&WorkingBank>) -> Result<()> {
         // Register and send the entry out while holding the lock if the max PoH height
         // hasn't been reached.
@@ -71,11 +85,10 @@ impl PohRecorder {
         let result = if let Some(working_bank) = working_bank {
             self.tick_working_bank(&mut poh, working_bank)
         } else {
-            Ok(())
+            Err(Error::PohRecorderError(PohRecorderError::MaxHeightReached))
         };
         result.map_err(|e| {
             let tick = Self::generate_tick(&mut poh);
-            trace!("generated cached tick {}", tick.1);
             self.tick_cache.lock().unwrap().push(tick);
             e
         })
@@ -135,17 +148,17 @@ impl PohRecorder {
         Ok(())
     }
 
-    fn generate_tick(poh: &mut Poh) -> (Entry, u64) {
+    fn generate_tick(poh: &mut Poh) -> Entry {
         let tick = poh.tick();
-        (Entry {
+        Entry {
             num_hashes: tick.num_hashes,
             id: tick.id,
             transactions: vec![],
-        }, tick.tick_height)
+        }
     }
 
     fn register_and_send_tick(poh: &mut Poh, working_bank: &WorkingBank) -> Result<()> {
-        let (tick, _) = Self::generate_tick(poh);
+        let tick = Self::generate_tick(poh);
         working_bank.bank.register_tick(&tick.id);
         working_bank.sender.send(vec![tick])?;
         Ok(())
