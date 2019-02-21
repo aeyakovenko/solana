@@ -56,8 +56,6 @@ impl BankingStage {
             max_tick_height,
         };
 
-        //TODO: this will be called by the TVU every time it votes
-        //instead of here
         working_bank_sender
             .send(working_bank.clone())
             .expect("failed to send leader to poh_service");
