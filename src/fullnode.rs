@@ -137,8 +137,11 @@ impl Fullnode {
         let exit = Arc::new(AtomicBool::new(false));
         info!("starting PoH... {} {}", bank.tick_height(), last_entry_id);
         let poh_recorder = PohRecorder::new(bank.tick_height(), last_entry_id);
-        let (poh_service, working_bank_sender) =
-            PohService::new(poh_recorder.clone(), config.tick_config, exit.clone());
+        let (poh_service, working_bank_sender) = PohService::new(
+            poh_recorder.clone(),
+            config.tick_config,
+            Arc::new(AtomicBool::new(false)),
+        );
 
         info!("node info: {:?}", node.info);
         info!("node entrypoint_info: {:?}", entrypoint_info_option);
