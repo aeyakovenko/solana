@@ -365,9 +365,6 @@ impl Fullnode {
             };
             let tpu_bank = Arc::new(Bank::new_from_parent(&self.bank));
 
-            //TODO: this will be called by the TVU every time it votes
-            //instead of here
-            self.poh_recorder.reset(&tpu_bank);
             self.node_services.tpu.switch_to_leader(
                 &tpu_bank,
                 &self.poh_recorder,
@@ -420,6 +417,9 @@ impl Fullnode {
                 Ok(tick_height) => {
                     trace!("{:?}: rotate at tick_height={}", self.id, tick_height);
                     let (next_leader, max_tick_height) = self.get_next_leader(tick_height);
+                    //TODO: this will be called by the TVU every time it votes
+                    //instead of here
+                    self.poh_recorder.reset(&self.bank);
                     let transition = self.rotate(next_leader, max_tick_height, 0);
                     debug!("role transition complete: {:?}", transition);
                     if let Some(ref rotation_notifier) = rotation_notifier {

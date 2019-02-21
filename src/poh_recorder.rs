@@ -44,7 +44,13 @@ impl PohRecorder {
     pub fn reset(&self, bank: &Bank) {
         let mut poh = self.poh.lock().unwrap();
         let mut cache = vec![];
-        trace!("reset poh from: {},{} to: {},{}", poh.id, poh.tick_height, bank.last_id(),bank.tick_height());
+        trace!(
+            "reset poh from: {},{} to: {},{}",
+            poh.id,
+            poh.tick_height,
+            bank.last_id(),
+            bank.tick_height()
+        );
         std::mem::swap(&mut cache, &mut self.tick_cache.lock().unwrap());
         *poh = Poh::new(bank.last_id(), bank.tick_height());
     }
