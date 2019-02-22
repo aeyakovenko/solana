@@ -55,12 +55,11 @@ impl PohRecorder {
         *poh = Poh::new(bank.last_id(), bank.tick_height());
     }
 
-    fn flush_cache(&self, working_bank: &WorkingBank) -> Result<()> {
+    fn flush_cache(&self, tick_height: u64, working_bank: &WorkingBank) -> Result<()> {
         // check_tick_height is called before flush cache, so it cannot overrun the bank
         // so a bank that is so late that it's slot fully generated before it starts recording
         // will fail instead of broadcasting any ticks
-        let mut cache = vec![];
-        std::mem::swap(&mut cache, &mut self.tick_cache.lock().unwrap());
+        let cache = &mut self.tick_cache.lock().unwrap();
         if !cache.is_empty() {
             trace!(
                 "flush_cache: {} {} {}",
@@ -68,6 +67,11 @@ impl PohRecorder {
                 cache.len(),
                 working_bank.max_tick_height
             );
+
+            let len =
+                cache.len() - (tick_height.saturating_sub(working_bank.max_tick_height)) as usize;
+            let cache: Vec<_> = cache.drain(..len).collect();
+
             for t in &cache {
                 working_bank.bank.register_tick(&t.id);
             }
@@ -77,9 +81,21 @@ impl PohRecorder {
     }
 
     fn tick_working_bank(&self, poh: &mut Poh, working_bank: &WorkingBank) -> Result<()> {
-        Self::check_tick_height(&poh, working_bank)?;
-        self.flush_cache(working_bank)?;
-        Self::register_and_send_tick(&mut *poh, working_bank)
+        match Self::check_tick_height(&poh, working_bank) {
+            Err(Error::PohRecorderError(PohRecorderError::MinHeightNotReached)) => Err(
+                //todo should min height also flush cache?
+                Error::PohRecorderError(PohRecorderError::MinHeightNotReached),
+            )?,
+            Err(Error::PohRecorderError(PohRecorderError::MaxHeightReached)) => {
+                self.flush_cache(poh.tick_height, working_bank)?;
+                Err(Error::PohRecorderError(PohRecorderError::MaxHeightReached))?
+            }
+            Err(e) => Err(e)?,
+            Ok(()) => {
+                self.flush_cache(poh.tick_height, working_bank)?;
+                Self::register_and_send_tick(&mut *poh, working_bank)
+            }
+        }
     }
 
     pub fn tick(&self, working_bank: Option<&WorkingBank>) -> Result<()> {
@@ -111,7 +127,7 @@ impl PohRecorder {
         let mut poh = self.poh.lock().unwrap();
 
         Self::check_tick_height(&poh, working_bank)?;
-        self.flush_cache(working_bank)?;
+        self.flush_cache(poh.tick_height, working_bank)?;
 
         Self::record_and_send_txs(&mut *poh, mixin, txs, working_bank)
     }
