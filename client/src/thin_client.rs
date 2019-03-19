@@ -75,14 +75,14 @@ impl ThinClient {
 
     /// Retry a sending a signed Transaction to the server for processing.
     pub fn retry_transfer_until_confirmed(
-        &mut self,
+        &self,
         keypair: &Keypair,
         transaction: &mut Transaction,
         tries: usize,
         confs: usize,
     ) -> io::Result<Signature> {
         for x in 0..tries {
-            transaction.sign(&[keypair], self.get_recent_blockhash());
+            transaction.sign(&[keypair], self.get_recent_blockhash()?);
             let mut buf = vec![0; transaction.serialized_size().unwrap() as usize];
             let mut wr = std::io::Cursor::new(&mut buf[..]);
             serialize_into(&mut wr, &transaction)
@@ -172,78 +172,11 @@ impl ThinClient {
     }
     /// Poll the server to confirm a transaction.
     pub fn poll_for_confirmed_signature(
-        &mut self,
+        &self,
         signature: &Signature,
         confs: usize,
     ) -> io::Result<()> {
-        let mut now = Instant::now();
-        let mut start = 0;
-        let mut prev = 0;
-        while !self.check_confirmations(signature, confs, &mut prev) {
-            if start != prev {
-                info!(
-                    "signature {} confirmed {} out of {}",
-                    signature, start, confs
-                );
-                now = Instant::now();
-                start = prev;
-            }
-            if now.elapsed().as_secs() > 15 {
-                // TODO: Return a better error.
-                return Err(io::Error::new(io::ErrorKind::Other, "signature not found"));
-            }
-            sleep(Duration::from_millis(250));
-        }
-        Ok(())
-    }
-
-    /// Poll the server to confirm a transaction.
-    pub fn poll_for_signature(&mut self, signature: &Signature) -> io::Result<()> {
-        let now = Instant::now();
-        while !self.check_signature(signature) {
-            if now.elapsed().as_secs() > 15 {
-                // TODO: Return a better error.
-                return Err(io::Error::new(io::ErrorKind::Other, "signature not found"));
-            }
-            sleep(Duration::from_millis(250));
-        }
-        Ok(())
-    }
-
-    pub fn check_confirmations(
-        &mut self,
-        signature: &Signature,
-        confs: usize,
-        prev: &mut usize,
-    ) -> bool {
-        trace!("check_confirmations: {:?}", signature);
-        let now = Instant::now();
-        loop {
-            let response = self.get_signature_confirmations(signature);
-            match response {
-                Ok(count) => {
-                    solana_metrics::submit(
-                        influxdb::Point::new("thinclient")
-                            .add_tag(
-                                "op",
-                                influxdb::Value::String("check_confirmations".to_string()),
-                            )
-                            .add_field(
-                                "duration_ms",
-                                influxdb::Value::Integer(
-                                    timing::duration_as_ms(&now.elapsed()) as i64
-                                ),
-                            )
-                            .to_owned(),
-                    );
-                    *prev = count;
-                    return count >= confs;
-                }
-                Err(err) => {
-                    debug!("check_confirmations request failed: {:?}", err);
-                }
-            };
-        }
+        self.rpc_client.poll_for_confirmed_signature(signature, confs)
     }
 
     /// Check a signature in the bank. This method blocks
@@ -256,38 +189,7 @@ impl ThinClient {
         self.rpc_client.fullnode_exit()
     }
     pub fn get_signature_confirmations(&mut self, sig: &Signature) -> io::Result<usize> {
-        trace!(
-            "get_signature_confirmations sending request to {}",
-            self.rpc_addr
-        );
-        let params = json!([format!("{}", sig)]);
-        let response = self
-            .rpc_client
-            .make_rpc_request(
-                1,
-                RpcRequest::GetSignatureConfirmations,
-                Some(params.clone()),
-            )
-            .map_err(|error| {
-                debug!(
-                    "Response from {} get_signature_confirmations: {}",
-                    self.rpc_addr, error
-                );
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "GetSignatureConfirmations request failure",
-                )
-            })?;
-        serde_json::from_value(response).map_err(|error| {
-            debug!(
-                "ParseError: from {} get_signature_confirmations: {}",
-                self.rpc_addr, error
-            );
-            io::Error::new(
-                io::ErrorKind::Other,
-                "GetSignatureConfirmations parse failure",
-            )
-        })
+        self.rpc_client.get_signature_confirmations(sig)
     }
 }
 
