@@ -34,7 +34,7 @@ use std::cmp;
 #[derive(Clone)]
 pub struct Crds {
     /// Stores the map of labels and values
-    pub table: IndexMap<CrdsValueLabel, VersionedCrdsValue>,
+    pub table: IndexMap<CrdsValueLabel, Vec<VersionedCrdsValue>>,
 }
 
 #[derive(PartialEq, Debug)]
@@ -95,18 +95,31 @@ impl Crds {
     /// insert the new value, returns the old value if insert succeeds
     pub fn insert_versioned(
         &mut self,
-        new_value: VersionedCrdsValue,
+        mut new_value: VersionedCrdsValue,
     ) -> Result<Option<VersionedCrdsValue>, CrdsError> {
         let label = new_value.value.label();
         let wallclock = new_value.value.wallclock();
         let do_insert = self
             .table
             .get(&label)
-            .map(|current| new_value > *current)
+            .flat_map(|current| current.map(|c| new_value > *current))
             .unwrap_or(true);
         if do_insert {
-            let old = self.table.insert(label, new_value);
-            Ok(old)
+            let mut vals = self.table.entry(&label).or_insert(vec![]);
+            let max = label.max_items();
+            if vals.len() == max {
+                let mut min = 0;
+                for (v, i) in vals.iter().enumerate() {
+                    if vals[min] > v {
+                        min = i;
+                    }
+                }
+                std::mem::swap(&mut vals[min], &mut new_value);
+                Ok(Some(new_value))
+            } else {
+                vals.append(new_value);
+                Ok(None)
+            }
         } else {
             trace!("INSERT FAILED data: {} new.wallclock: {}", label, wallclock,);
             Err(CrdsError::InsertFailed)
@@ -120,11 +133,11 @@ impl Crds {
         let new_value = self.new_versioned(local_timestamp, value);
         self.insert_versioned(new_value)
     }
-    pub fn lookup(&self, label: &CrdsValueLabel) -> Option<&CrdsValue> {
+    pub fn lookup(&self, label: &CrdsValueLabel) -> Vec<&CrdsValue> {
         self.table.get(label).map(|x| &x.value)
     }
 
-    pub fn lookup_versioned(&self, label: &CrdsValueLabel) -> Option<&VersionedCrdsValue> {
+    pub fn lookup_versioned(&self, label: &CrdsValueLabel) -> Vec<&VersionedCrdsValue> {
         self.table.get(label)
     }
 
@@ -145,12 +158,14 @@ impl Crds {
     pub fn find_old_labels(&self, min_ts: u64) -> Vec<CrdsValueLabel> {
         self.table
             .iter()
-            .filter_map(|(k, v)| {
-                if v.local_timestamp <= min_ts {
-                    Some(k)
-                } else {
-                    None
-                }
+            .filter_map(|(k, vals)| {
+                vals.flat_map(|v| {
+                    if v.local_timestamp <= min_ts {
+                        Some(k)
+                    } else {
+                        None
+                    }
+                })
             })
             .cloned()
             .collect()

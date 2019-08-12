@@ -186,9 +186,15 @@ impl CrdsGossipPull {
             .iter()
             .filter(|label| label.pubkey() != *self_id)
             .filter_map(|label| {
-                let rv = crds
-                    .lookup_versioned(label)
-                    .map(|val| (val.value_hash, val.local_timestamp));
+                let rv = crds.lookup_versioned(label).flat_map(|vals| {
+                    vals.filter_map(|val| {
+                        if val.local_timestamp <= min_ts {
+                            Some((val.value_hash, val.local_timestamp))
+                        } else {
+                            None
+                        }
+                    })
+                });
                 crds.remove(label);
                 rv
             })

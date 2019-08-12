@@ -7,6 +7,10 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fmt;
 
+const NUM_CONTACT_INFO: usize = 1;
+const NUM_VOTES: usize = 5;
+const NUM_EPOCH_SLOTS: usize = 1;
+
 /// CrdsValue that is replicated across the cluster
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum CrdsValue {
@@ -139,6 +143,13 @@ impl CrdsValueLabel {
             CrdsValueLabel::ContactInfo(p) => *p,
             CrdsValueLabel::Vote(p) => *p,
             CrdsValueLabel::EpochSlots(p) => *p,
+        }
+    }
+    pub fn max_items(&self) -> usize {
+        match self {
+            CrdsValueLabel::ContactInfo(p) => NUM_CONTACT_INFO,
+            CrdsValueLabel::Vote(p) => NUM_VOTES,
+            CrdsValueLabel::EpochSlots(p) => NUM_EPOCH_SLOTS,
         }
     }
 }
