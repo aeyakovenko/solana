@@ -171,8 +171,9 @@ impl Crds {
             .collect()
     }
 
-    pub fn remove(&mut self, key: &CrdsValueLabel) {
-        self.table.remove(key);
+    pub fn remove(&mut self, key: &CrdsValueLabel, min_ts: u64) {
+        let vals = self.table.lookup(key);
+        vals.retain(|v| v.local_timestamp > min_ts);
     }
 }
 

@@ -195,7 +195,7 @@ impl CrdsGossipPull {
                         }
                     })
                 });
-                crds.remove(label);
+                crds.remove(label, min_ts);
                 rv
             })
             .collect();
