@@ -45,8 +45,8 @@ pub fn init() {
     }
 }
 
-fn verify_packet(packet: &Packet) -> u8 {
-    let (sig_len, sig_start, msg_start, pubkey_start) = get_packet_offsets(packet, 0);
+fn verify_packet<T: Offsets>(packet: &Packet, offsets: &T, ix: usize) -> u8 {
+    let (sig_len, sig_start, msg_start, pubkey_start) = offsets.get_packet_offsets(packet, 0);
     let mut sig_start = sig_start as usize;
     let mut pubkey_start = pubkey_start as usize;
     let msg_start = msg_start as usize;
@@ -65,8 +65,13 @@ fn verify_packet(packet: &Packet) -> u8 {
         }
 
         let signature = Signature::new(&packet.data[sig_start..sig_end]);
+        let pubkey_data = if let Some((keys, _)) = offsets.get_pubkeys() {
+            &keys[ix].as_ref()[..]
+        } else {
+            &packet.data[pubkey_start..pubkey_end]
+        };
         if !signature.verify(
-            &packet.data[pubkey_start..pubkey_end],
+            pubkey_data,
             &packet.data[msg_start..msg_end],
         ) {
             return 0;
@@ -81,26 +86,36 @@ fn batch_size(batches: &[Packets]) -> usize {
     batches.iter().map(|p| p.packets.len()).sum()
 }
 
-pub fn get_packet_offsets(packet: &Packet, current_offset: u32) -> (u32, u32, u32, u32) {
-    let (sig_len, sig_size) = decode_len(&packet.data);
-    let msg_start_offset = sig_size + sig_len * size_of::<Signature>();
-
-    let (_pubkey_len, pubkey_size) = decode_len(&packet.data[msg_start_offset..]);
-
-    let sig_start = current_offset as usize + sig_size;
-    let msg_start = current_offset as usize + msg_start_offset;
-    let pubkey_start =
-        msg_start + serialized_size(&MessageHeader::default()).unwrap() as usize + pubkey_size;
-
-    (
-        sig_len as u32,
-        sig_start as u32,
-        msg_start as u32,
-        pubkey_start as u32,
-    )
+pub trait Offsets {
+    fn get_packet_offsets(&self, packet: &Packet, current_offset: u32) -> (u32, u32, u32, u32);
+    fn get_pubkeys(&self) -> Option<(&PinnedVec<Pubkey>, &PinnedVec<u32>);
 }
 
-pub fn generate_offsets(batches: &[Packets], recycler: &Recycler<TxOffset>) -> Result<TxOffsets> {
+pub struct TransactionOffsets {
+}
+
+impl Offsets for  TransactionOffsets  {
+    pub fn get_packet_offsets(&self, packet: &Packet, current_offset: u32) -> (u32, u32, u32, u32) {
+        let (sig_len, sig_size) = decode_len(&packet.data);
+        let msg_start_offset = sig_size + sig_len * size_of::<Signature>();
+    
+        let (_pubkey_len, pubkey_size) = decode_len(&packet.data[msg_start_offset..]);
+    
+        let sig_start = current_offset as usize + sig_size;
+        let msg_start = current_offset as usize + msg_start_offset;
+        let pubkey_start =
+            msg_start + serialized_size(&MessageHeader::default()).unwrap() as usize + pubkey_size;
+    
+        (
+            sig_len as u32,
+            sig_start as u32,
+            msg_start as u32,
+            pubkey_start as u32,
+        )
+    }
+}
+
+pub fn generate_offsets<T: Offsets>(batches: &[Packets], offsets: &T, recycler: &Recycler<TxOffset>) -> Result<TxOffsets> {
     debug!("allocating..");
     let mut signature_offsets: PinnedVec<_> = recycler.allocate("sig_offsets");
     signature_offsets.set_pinnable();
@@ -118,7 +133,7 @@ pub fn generate_offsets(batches: &[Packets], recycler: &Recycler<TxOffset>) -> R
             let current_offset = current_packet as u32 * size_of::<Packet>() as u32;
 
             let (sig_len, sig_start, msg_start_offset, pubkey_offset) =
-                get_packet_offsets(packet, current_offset);
+                offsets.get_packet_offsets(packet, current_offset);
             let mut pubkey_offset = pubkey_offset;
 
             sig_lens.push(sig_len);
@@ -157,7 +172,8 @@ pub fn ed25519_verify_cpu(batches: &[Packets]) -> Vec<Vec<u8>> {
         thread_pool.borrow().install(|| {
             batches
                 .into_par_iter()
-                .map(|p| p.packets.par_iter().map(verify_packet).collect())
+                .enumerate()
+                .map(|(p, i)| p.packets.par_iter().map(|p| verify_packet(p, offsets, i)).collect())
                 .collect()
         })
     });
@@ -177,8 +193,9 @@ pub fn ed25519_verify_disabled(batches: &[Packets]) -> Vec<Vec<u8>> {
     rv
 }
 
-pub fn ed25519_verify(
+pub fn ed25519_verify<T: Offsets>(
     batches: &[Packets],
+    offsets: &T,
     recycler: &Recycler<TxOffset>,
     recycler_out: &Recycler<PinnedVec<u8>>,
 ) -> Vec<Vec<u8>> {
@@ -227,6 +244,12 @@ pub fn ed25519_verify(
     trace!("packet sizeof: {}", size_of::<Packet>() as u32);
     trace!("len offset: {}", PACKET_DATA_SIZE as u32);
     const USE_NON_DEFAULT_STREAM: u8 = 1;
+    let pubkey_offset_ptr = if let Some((keys, offsets)) = offsets.get_pubkeys() {
+        elems.append(keys.as_ptr());
+        offsets.as_ptr()
+    } else {
+        pubkey_offsets.as_ptr()
+    };
     unsafe {
         let res = (api.ed25519_verify_many)(
             elems.as_ptr(),
@@ -235,7 +258,7 @@ pub fn ed25519_verify(
             num_packets as u32,
             signature_offsets.len() as u32,
             msg_sizes.as_ptr(),
-            pubkey_offsets.as_ptr(),
+            pubkey_offset_ptr,
             signature_offsets.as_ptr(),
             msg_start_offsets.as_ptr(),
             out.as_mut_ptr(),
