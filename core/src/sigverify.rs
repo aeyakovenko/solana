@@ -88,7 +88,7 @@ fn batch_size(batches: &[Packets]) -> usize {
 
 pub trait Offsets {
     fn get_packet_offsets(&self, packet: &Packet, current_offset: u32) -> (u32, u32, u32, u32);
-    fn get_pubkeys(&self) -> Option<(&PinnedVec<Pubkey>, &PinnedVec<u32>);
+    fn get_pubkeys(&self) -> Option<&PinnedVec<Pubkey>>;
 }
 
 pub struct TransactionOffsets {
@@ -112,6 +112,9 @@ impl Offsets for  TransactionOffsets  {
             msg_start as u32,
             pubkey_start as u32,
         )
+    }
+    fn get_pubkeys(&self) -> Option<&PinnedVec<Pubkey>>  {
+        None
     }
 }
 
