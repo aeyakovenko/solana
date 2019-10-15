@@ -23,7 +23,16 @@ use std::mem::size_of;
 use solana_rayon_threadlimit::get_thread_count;
 pub const NUM_THREADS: u32 = 10;
 use std::cell::RefCell;
-
+ 
+/// Generic trait for feeding pubkey and signature offsets to the sigverify stage 
+pub trait Offsets {
+    /// returns (sig_len, sig_start, msg_start, pubkey_start)
+    fn get_packet_offsets(&self, packet: &Packet, current_offset: u32, packet_index: (usize, usize)) -> (u32, u32, u32, u32);
+    /// some messages have implicit pubkeys
+    fn get_pubkeys(&self) -> Option<&PinnedVec<Pubkey>>;  
+    fn get_pubkey(&self, pubkeys_start: usize) -> Option<&Pubkey>;
+}
+ 
 thread_local!(static PAR_THREAD_POOL: RefCell<ThreadPool> = RefCell::new(rayon::ThreadPoolBuilder::new()
                     .num_threads(get_thread_count())
                     .build()
@@ -45,8 +54,8 @@ pub fn init() {
     }
 }
 
-fn verify_packet<T: Offsets>(packet: &Packet, offsets: &T, ix: usize) -> u8 {
-    let (sig_len, sig_start, msg_start, pubkey_start) = offsets.get_packet_offsets(packet, 0);
+fn verify_packet<T: Offsets>(packet: &Packet, offsets: &T, ix: (usize, usize)) -> u8 {
+    let (sig_len, sig_start, msg_start, pubkey_start) = offsets.get_packet_offsets(packet, 0, ix);
     let mut sig_start = sig_start as usize;
     let mut pubkey_start = pubkey_start as usize;
     let msg_start = msg_start as usize;
@@ -65,8 +74,8 @@ fn verify_packet<T: Offsets>(packet: &Packet, offsets: &T, ix: usize) -> u8 {
         }
 
         let signature = Signature::new(&packet.data[sig_start..sig_end]);
-        let pubkey_data = if let Some((keys, _)) = offsets.get_pubkeys() {
-            &keys[ix].as_ref()[..]
+        let pubkey_data = if let Some(pubkey) = offsets.get_pubkey(pubkey_start) {
+            &pubkey.as_ref()[..]
         } else {
             &packet.data[pubkey_start..pubkey_end]
         };
@@ -86,16 +95,11 @@ fn batch_size(batches: &[Packets]) -> usize {
     batches.iter().map(|p| p.packets.len()).sum()
 }
 
-pub trait Offsets {
-    fn get_packet_offsets(&self, packet: &Packet, current_offset: u32) -> (u32, u32, u32, u32);
-    fn get_pubkeys(&self) -> Option<&PinnedVec<Pubkey>>;
-}
-
 pub struct TransactionOffsets {
 }
 
 impl Offsets for  TransactionOffsets  {
-    pub fn get_packet_offsets(&self, packet: &Packet, current_offset: u32) -> (u32, u32, u32, u32) {
+    pub fn get_packet_offsets(&self, packet: &Packet, current_offset: u32, _packet_index: u32) -> (u32, u32, u32, u32) {
         let (sig_len, sig_size) = decode_len(&packet.data);
         let msg_start_offset = sig_size + sig_len * size_of::<Signature>();
     
@@ -130,13 +134,13 @@ pub fn generate_offsets<T: Offsets>(batches: &[Packets], offsets: &T, recycler: 
     msg_sizes.set_pinnable();
     let mut current_packet = 0;
     let mut v_sig_lens = Vec::new();
-    batches.iter().for_each(|p| {
+    batches.iter().enumerate().for_each(|(p, i)| {
         let mut sig_lens = Vec::new();
-        p.packets.iter().for_each(|packet| {
+        p.packets.iter().enumerate().for_each(|(packet, j)| {
             let current_offset = current_packet as u32 * size_of::<Packet>() as u32;
 
             let (sig_len, sig_start, msg_start_offset, pubkey_offset) =
-                offsets.get_packet_offsets(packet, current_offset);
+                offsets.get_packet_offsets(packet, current_offset, (i,j));
             let mut pubkey_offset = pubkey_offset;
 
             sig_lens.push(sig_len);
@@ -176,7 +180,7 @@ pub fn ed25519_verify_cpu(batches: &[Packets]) -> Vec<Vec<u8>> {
             batches
                 .into_par_iter()
                 .enumerate()
-                .map(|(p, i)| p.packets.par_iter().map(|p| verify_packet(p, offsets, i)).collect())
+                .map(|(p, i)| p.packets.par_iter().enumerate().map(|(p, j)| verify_packet(p, offsets, (i,j))).collect())
                 .collect()
         })
     });
@@ -220,7 +224,7 @@ pub fn ed25519_verify<T: Offsets>(
         return ed25519_verify_cpu(batches);
     }
 
-    let (signature_offsets, pubkey_offsets, msg_start_offsets, msg_sizes, sig_lens) =
+    let (signature_offsets, mut pubkey_offsets, msg_start_offsets, msg_sizes, sig_lens) =
         generate_offsets(batches, recycler).unwrap();
 
     debug!("CUDA ECDSA for {}", batch_size(batches));
@@ -247,12 +251,17 @@ pub fn ed25519_verify<T: Offsets>(
     trace!("packet sizeof: {}", size_of::<Packet>() as u32);
     trace!("len offset: {}", PACKET_DATA_SIZE as u32);
     const USE_NON_DEFAULT_STREAM: u8 = 1;
-    let pubkey_offset_ptr = if let Some((keys, offsets)) = offsets.get_pubkeys() {
+    if let Some(keys) = offsets.get_pubkeys() {
+        let mut total = 0;
+        for e in &elems {
+            total += e.len();
+        }
+        total *= size_of::<Packet>();
         elems.append(keys.as_ptr());
-        offsets.as_ptr()
-    } else {
-        pubkey_offsets.as_ptr()
-    };
+        for offset in &mut pubkey_offsets {
+            offset += total;
+        }
+    }
     unsafe {
         let res = (api.ed25519_verify_many)(
             elems.as_ptr(),
@@ -261,7 +270,7 @@ pub fn ed25519_verify<T: Offsets>(
             num_packets as u32,
             signature_offsets.len() as u32,
             msg_sizes.as_ptr(),
-            pubkey_offset_ptr,
+            pubkey_offset.as_ptr(),
             signature_offsets.as_ptr(),
             msg_start_offsets.as_ptr(),
             out.as_mut_ptr(),
