@@ -4,9 +4,9 @@
 //! to the GPU.
 //!
 
-use crate::cuda_runtime::PinnedVec;
+use solana_ledger::cuda_runtime::PinnedVec;
 use crate::packet::{Packet, Packets};
-use crate::recycler::Recycler;
+use solana_ledger::recycler::Recycler;
 use crate::sigverify_stage::{SigVerifier, VerifiedPackets};
 use bincode::serialized_size;
 use rayon::ThreadPool;

@@ -1,8 +1,8 @@
 //! The `shred_fetch_stage` pulls shreds from UDP sockets and sends it to a channel.
 
-use crate::cuda_runtime::PinnedVec;
+use solana_ledger::cuda_runtime::PinnedVec;
 use crate::packet::Packet;
-use crate::recycler::Recycler;
+use solana_ledger::recycler::Recycler;
 use crate::service::Service;
 use crate::streamer::{self, PacketReceiver, PacketSender};
 use std::net::UdpSocket;

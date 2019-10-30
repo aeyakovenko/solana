@@ -17,13 +17,12 @@ use std::cmp;
 use std::fmt;
 use std::io;
 use std::io::Cursor;
-use std::mem;
 use std::mem::size_of;
 use std::net::{SocketAddr, UdpSocket};
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
-pub use solana_ledger::packet::{NUM_RECVMMSGS, Packet};
+pub use solana_ledger::packet::{NUM_RECVMMSGS, Packets, PacketsRecycler};
 
 pub type SharedBlob = Arc<RwLock<Blob>>;
 pub type SharedBlobs = Vec<SharedBlob>;

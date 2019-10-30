@@ -1,6 +1,7 @@
 //! The `recvmmsg` module provides recvmmsg() API implementation
 
-use crate::packet::{NUM_RCVMMSGS, Packet};
+pub use crate::packet::NUM_RECVMMSGS;
+use crate::packet::Packet;
 use std::cmp;
 use std::io;
 use std::net::UdpSocket;

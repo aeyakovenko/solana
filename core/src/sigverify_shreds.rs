@@ -1,8 +1,7 @@
 #![allow(clippy::implicit_hasher)]
-use crate::cuda_runtime::PinnedVec;
+use solana_ledger::cuda_runtime::PinnedVec;
 use crate::packet::{Packet, Packets};
-use crate::recycler::Recycler;
-use crate::recycler::Reset;
+use solana_ledger::recycler::Recycler;
 use crate::sigverify::{self, TxOffset};
 use crate::sigverify_stage::SigVerifier;
 use crate::sigverify_stage::VerifiedPackets;
@@ -100,12 +99,6 @@ thread_local!(static PAR_THREAD_POOL: RefCell<ThreadPool> = RefCell::new(rayon::
                     .thread_name(|ix| format!("sigverify_shreds_{}", ix))
                     .build()
                     .unwrap()));
-
-impl Reset for PinnedVec<[u8; 32]> {
-    fn reset(&mut self) {
-        self.resize(0, [0u8; 32]);
-    }
-}
 
 /// Assuming layout is
 /// signature: Signature
