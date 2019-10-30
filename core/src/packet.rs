@@ -23,6 +23,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
+pub use solana_ledger::packet::{NUM_RECVMMSGS, Packet};
 
 pub type SharedBlob = Arc<RwLock<Blob>>;
 pub type SharedBlobs = Vec<SharedBlob>;
@@ -35,72 +36,6 @@ pub const NUM_BLOBS: usize = (NUM_PACKETS * PACKET_DATA_SIZE) / BLOB_SIZE;
 
 pub const PACKETS_PER_BATCH: usize = 256;
 pub const PACKETS_BATCH_SIZE: usize = (PACKETS_PER_BATCH * PACKET_DATA_SIZE);
-
-#[derive(Debug, Clone)]
-pub struct Packets {
-    pub packets: PinnedVec<Packet>,
-
-    recycler: Option<PacketsRecycler>,
-}
-
-impl Drop for Packets {
-    fn drop(&mut self) {
-        if let Some(ref recycler) = self.recycler {
-            let old = mem::replace(&mut self.packets, PinnedVec::default());
-            recycler.recycle(old)
-        }
-    }
-}
-
-impl Reset for Packets {
-    fn reset(&mut self) {
-        self.packets.resize(0, Packet::default());
-    }
-}
-
-impl Reset for PinnedVec<Packet> {
-    fn reset(&mut self) {
-        self.resize(0, Packet::default());
-    }
-}
-
-//auto derive doesn't support large arrays
-impl Default for Packets {
-    fn default() -> Packets {
-        let packets = PinnedVec::with_capacity(NUM_RCVMMSGS);
-        Packets {
-            packets,
-            recycler: None,
-        }
-    }
-}
-
-pub type PacketsRecycler = Recycler<PinnedVec<Packet>>;
-
-impl Packets {
-    pub fn new(packets: Vec<Packet>) -> Self {
-        let packets = PinnedVec::from_vec(packets);
-        Self {
-            packets,
-            recycler: None,
-        }
-    }
-
-    pub fn new_with_recycler(recycler: PacketsRecycler, size: usize, name: &'static str) -> Self {
-        let mut packets = recycler.allocate(name);
-        packets.reserve_and_pin(size);
-        Packets {
-            packets,
-            recycler: Some(recycler),
-        }
-    }
-
-    pub fn set_addr(&mut self, addr: &SocketAddr) {
-        for m in self.packets.iter_mut() {
-            m.meta.set_addr(&addr);
-        }
-    }
-}
 
 #[repr(align(16))] // 16 === BLOB_DATA_ALIGN
 pub struct BlobData {

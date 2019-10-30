@@ -1,6 +1,7 @@
 //! The `shred` module defines data structures and methods to pull MTU sized data frames from the network.
 use crate::entry::{create_ticks, Entry};
 use crate::erasure::Session;
+use crate::packet::{Packets, PacketsRecycler, NUM_RCVMMSGS};
 use core::cell::RefCell;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 use rayon::slice::ParallelSlice;
@@ -14,6 +15,8 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::{Keypair, KeypairUtil, Signature};
 use std::sync::Arc;
 use std::time::Instant;
+
+const NUM_PACKETS: usize = NUM_RCVMMSGS;
 
 /// The following constants are computed by hand, and hardcoded.
 /// `test_shred_constants` ensures that the values are correct.
@@ -335,8 +338,8 @@ impl Shred {
 
 #[derive(Debug)]
 pub struct Shredder {
-    slot: u64,
-    parent_slot: u64,
+    pub slot: u64,
+    pub parent_slot: u64,
     fec_rate: f32,
     keypair: Arc<Keypair>,
     pub signing_coding_time: u128,
@@ -357,6 +360,75 @@ impl Shredder {
                 signing_coding_time: 0,
             })
         }
+    }
+
+    pub fn entries_to_unsigned_data_shreds(
+        &self,
+        recycler: &PacketsRecycler,
+        entries: &[Entry],
+        is_last_in_slot: bool,
+        next_shred_index: u32,
+    ) -> Vec<Packets> {
+        let now = Instant::now();
+        let serialized_shreds =
+            bincode::serialize(entries).expect("Expect to serialize all entries");
+        let serialize_time = now.elapsed().as_millis();
+
+        let no_header_size = SIZE_OF_DATA_SHRED_PAYLOAD;
+        let num_shreds = (serialized_shreds.len() + no_header_size - 1) / no_header_size;
+        let last_shred_index = next_shred_index + num_shreds as u32 - 1;
+
+        // 1) Generate data shreds
+        let data_shreds: Vec<Packets> = PAR_THREAD_POOL.with(|thread_pool| {
+            thread_pool.borrow().install(|| {
+                serialized_shreds
+                    .par_chunks(no_header_size)
+                    .enumerate()
+                    .chunks(NUM_PACKETS)
+                    .map(|chunk| {
+                        let mut packets = Packets::new_with_recycler(
+                            recycler.clone(),
+                            NUM_PACKETS,
+                            "data shreds",
+                        );
+                        for (i, shred_data) in chunk {
+                            let shred_index = next_shred_index + i as u32;
+
+                            let (is_last_data, is_last_in_slot) = {
+                                if shred_index == last_shred_index {
+                                    (true, is_last_in_slot)
+                                } else {
+                                    (false, false)
+                                }
+                            };
+
+                            let shred = Shred::new_from_data(
+                                self.slot,
+                                shred_index,
+                                (self.slot - self.parent_slot) as u16,
+                                Some(shred_data),
+                                is_last_data,
+                                is_last_in_slot,
+                            );
+                            let len = shred.payload.len();
+                            //not signed yet
+                            packets.packets[i].data[64..len]
+                                .copy_from_slice(&shred.payload[64..len]);
+                        }
+                        packets
+                    })
+                    .collect()
+            })
+        });
+        let elapsed = now.elapsed().as_millis();
+        datapoint_debug!(
+            "shredding-stats",
+            ("slot", self.slot as i64, i64),
+            ("num_data_shreds", data_shreds.len() as i64, i64),
+            ("signing_coding", (elapsed - serialize_time) as i64, i64),
+            ("serialzing", serialize_time as i64, i64),
+        );
+        data_shreds
     }
 
     pub fn entries_to_shreds(

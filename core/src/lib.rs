@@ -19,6 +19,7 @@ pub mod archiver;
 pub mod blockstream;
 pub mod blockstream_service;
 pub mod cluster_info;
+pub mod shred_utils;
 pub mod cluster_info_repair_listener;
 pub mod consensus;
 pub mod crds;

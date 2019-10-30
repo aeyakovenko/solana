@@ -4,14 +4,17 @@ pub mod blocktree;
 mod blocktree_db;
 mod blocktree_meta;
 pub mod blocktree_processor;
+pub mod cuda_runtime;
 pub mod entry;
 pub mod erasure;
 pub mod genesis_utils;
 pub mod leader_schedule;
 pub mod leader_schedule_cache;
 pub mod leader_schedule_utils;
+pub mod packet;
 pub mod perf_libs;
 pub mod poh;
+pub mod recycler;
 pub mod rooted_slot_iterator;
 pub mod shred;
 pub mod snapshot_package;
@@ -20,3 +23,6 @@ pub mod staking_utils;
 
 #[macro_use]
 extern crate solana_metrics;
+
+#[macro_use]
+extern crate log;
