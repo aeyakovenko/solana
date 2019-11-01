@@ -4,13 +4,13 @@
 //! to the GPU.
 //!
 
-use solana_ledger::cuda_runtime::PinnedVec;
 use crate::packet::{Packet, Packets};
-use solana_ledger::recycler::Recycler;
 use crate::sigverify_stage::{SigVerifier, VerifiedPackets};
 use bincode::serialized_size;
 use rayon::ThreadPool;
+use solana_ledger::cuda_runtime::PinnedVec;
 use solana_ledger::perf_libs;
+use solana_ledger::recycler::Recycler;
 use solana_metrics::inc_new_counter_debug;
 use solana_sdk::message::MessageHeader;
 use solana_sdk::pubkey::Pubkey;
@@ -413,11 +413,11 @@ pub fn make_packet_from_transaction(tx: Transaction) -> Packet {
 mod tests {
     use super::PacketError;
     use crate::packet::{Packet, Packets};
-    use crate::recycler::Recycler;
     use crate::sigverify;
     use crate::sigverify::PacketOffsets;
     use crate::test_tx::{test_multisig_tx, test_tx};
     use bincode::{deserialize, serialize};
+    use solana_ledger::recycler::Recycler;
     use solana_sdk::hash::Hash;
     use solana_sdk::message::{Message, MessageHeader};
     use solana_sdk::signature::Signature;

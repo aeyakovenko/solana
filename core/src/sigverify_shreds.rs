@@ -1,7 +1,5 @@
 #![allow(clippy::implicit_hasher)]
-use solana_ledger::cuda_runtime::PinnedVec;
 use crate::packet::{Packet, Packets};
-use solana_ledger::recycler::Recycler;
 use crate::sigverify::{self, TxOffset};
 use crate::sigverify_stage::SigVerifier;
 use crate::sigverify_stage::VerifiedPackets;
@@ -13,8 +11,10 @@ use rayon::iter::ParallelIterator;
 use rayon::ThreadPool;
 use solana_ed25519_dalek::{Keypair, PublicKey, SecretKey};
 use solana_ledger::bank_forks::BankForks;
+use solana_ledger::cuda_runtime::PinnedVec;
 use solana_ledger::leader_schedule_cache::LeaderScheduleCache;
 use solana_ledger::perf_libs;
+use solana_ledger::recycler::Recycler;
 use solana_ledger::shred::ShredType;
 use solana_metrics::inc_new_counter_debug;
 use solana_rayon_threadlimit::get_thread_count;

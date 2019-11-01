@@ -161,8 +161,8 @@ pub fn blob_receiver(
 mod test {
     use super::*;
     use crate::packet::{Blob, Packet, Packets, SharedBlob, PACKET_DATA_SIZE};
-    use crate::recycler::Recycler;
     use crate::streamer::{receiver, responder};
+    use solana_ledger::recycler::Recycler;
     use std::io;
     use std::io::Write;
     use std::net::UdpSocket;

@@ -1,7 +1,5 @@
 //! The `packet` module defines data structures and methods to pull data from the network.
-use crate::cuda_runtime::PinnedVec;
-use crate::recvmmsg::{recv_mmsg, NUM_RCVMMSGS};
-use crate::recycler::{Recycler, Reset};
+use crate::recvmmsg::recv_mmsg;
 use crate::result::{Error, Result};
 use bincode;
 use byteorder::{ByteOrder, LittleEndian};
@@ -22,7 +20,7 @@ use std::net::{SocketAddr, UdpSocket};
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
-pub use solana_ledger::packet::{NUM_RECVMMSGS, Packets, PacketsRecycler};
+pub use solana_ledger::packet::{NUM_RCVMMSGS, Packets, PacketsRecycler};
 
 pub type SharedBlob = Arc<RwLock<Blob>>;
 pub type SharedBlobs = Vec<SharedBlob>;
