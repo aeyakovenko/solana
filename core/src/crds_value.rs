@@ -19,12 +19,16 @@ pub enum CrdsValue {
     EpochSlots(EpochSlots),
 }
 
+pub struct SignedCrdsValue {
+    sig: Signature,
+    value: CrdsValue,    
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct EpochSlots {
     pub from: Pubkey,
     pub root: u64,
     pub slots: BTreeSet<u64>,
-    pub signature: Signature,
     pub wallclock: u64,
 }
 
@@ -34,38 +38,8 @@ impl EpochSlots {
             from,
             root,
             slots,
-            signature: Signature::default(),
             wallclock,
         }
-    }
-}
-
-impl Signable for EpochSlots {
-    fn pubkey(&self) -> Pubkey {
-        self.from
-    }
-
-    fn signable_data(&self) -> Cow<[u8]> {
-        #[derive(Serialize)]
-        struct SignData<'a> {
-            root: u64,
-            slots: &'a BTreeSet<u64>,
-            wallclock: u64,
-        }
-        let data = SignData {
-            root: self.root,
-            slots: &self.slots,
-            wallclock: self.wallclock,
-        };
-        Cow::Owned(serialize(&data).expect("unable to serialize EpochSlots"))
-    }
-
-    fn get_signature(&self) -> Signature {
-        self.signature
-    }
-
-    fn set_signature(&mut self, signature: Signature) {
-        self.signature = signature;
     }
 }
 
@@ -73,7 +47,6 @@ impl Signable for EpochSlots {
 pub struct Vote {
     pub from: Pubkey,
     pub transaction: Transaction,
-    pub signature: Signature,
     pub wallclock: u64,
 }
 
@@ -85,33 +58,6 @@ impl Vote {
             signature: Signature::default(),
             wallclock,
         }
-    }
-}
-
-impl Signable for Vote {
-    fn pubkey(&self) -> Pubkey {
-        self.from
-    }
-
-    fn signable_data(&self) -> Cow<[u8]> {
-        #[derive(Serialize)]
-        struct SignData<'a> {
-            transaction: &'a Transaction,
-            wallclock: u64,
-        }
-        let data = SignData {
-            transaction: &self.transaction,
-            wallclock: self.wallclock,
-        };
-        Cow::Owned(serialize(&data).expect("unable to serialize Vote"))
-    }
-
-    fn get_signature(&self) -> Signature {
-        self.signature
-    }
-
-    fn set_signature(&mut self, signature: Signature) {
-        self.signature = signature
     }
 }
 
@@ -197,45 +143,31 @@ impl CrdsValue {
     }
 }
 
-impl Signable for CrdsValue {
+impl Signable for SignedCrdsValue {
     fn sign(&mut self, keypair: &Keypair) {
-        match self {
-            CrdsValue::ContactInfo(contact_info) => contact_info.sign(keypair),
-            CrdsValue::Vote(vote) => vote.sign(keypair),
-            CrdsValue::EpochSlots(epoch_slots) => epoch_slots.sign(keypair),
-        };
+        let sig = keypair.sign(self.signable_data());
+        self.signature = sig;
     }
 
     fn verify(&self) -> bool {
-        match self {
-            CrdsValue::ContactInfo(contact_info) => contact_info.verify(),
-            CrdsValue::Vote(vote) => vote.verify(),
-            CrdsValue::EpochSlots(epoch_slots) => epoch_slots.verify(),
-        }
+        let data = self.signable_data();
+        self.signature.verify(data, self.pubkey())
     }
 
     fn pubkey(&self) -> Pubkey {
-        match self {
-            CrdsValue::ContactInfo(contact_info) => contact_info.pubkey(),
-            CrdsValue::Vote(vote) => vote.pubkey(),
-            CrdsValue::EpochSlots(epoch_slots) => epoch_slots.pubkey(),
-        }
+        self.value.pubkey()
     }
 
     fn signable_data(&self) -> Cow<[u8]> {
-        unimplemented!()
+        Cow::Owned(serialize(&self.value).expect("unable to serialize EpochSlots"))
     }
 
     fn get_signature(&self) -> Signature {
-        match self {
-            CrdsValue::ContactInfo(contact_info) => contact_info.get_signature(),
-            CrdsValue::Vote(vote) => vote.get_signature(),
-            CrdsValue::EpochSlots(epoch_slots) => epoch_slots.get_signature(),
-        }
+        self.signature
     }
 
-    fn set_signature(&mut self, _: Signature) {
-        unimplemented!()
+    fn set_signature(&mut self, sig: Signature) {
+        self.signature = sig;
     }
 }
 

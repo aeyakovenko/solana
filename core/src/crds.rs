@@ -24,10 +24,8 @@
 //! A value is updated to a new version if the labels match, and the value
 //! wallclock is later, or the value hash is greater.
 
-use crate::crds_value::{CrdsValue, CrdsValueLabel};
-use bincode::serialize;
+use crate::crds_value::{CrdsValue, SignedCrdsValue, CrdsValueLabel};
 use indexmap::map::IndexMap;
-use solana_sdk::hash::{hash, Hash};
 use solana_sdk::pubkey::Pubkey;
 use std::cmp;
 
@@ -47,13 +45,11 @@ pub enum CrdsError {
 /// stored in the Crds
 #[derive(PartialEq, Debug, Clone)]
 pub struct VersionedCrdsValue {
-    pub value: CrdsValue,
+    pub value: SignedCrdsValue,
     /// local time when inserted
     pub insert_timestamp: u64,
     /// local time when updated
     pub local_timestamp: u64,
-    /// value hash
-    pub value_hash: Hash,
 }
 
 impl PartialOrd for VersionedCrdsValue {
@@ -61,21 +57,22 @@ impl PartialOrd for VersionedCrdsValue {
         if self.value.label() != other.value.label() {
             None
         } else if self.value.wallclock() == other.value.wallclock() {
-            Some(self.value_hash.cmp(&other.value_hash))
+            Some(self.value_hash().cmp(&other.value_hash()))
         } else {
             Some(self.value.wallclock().cmp(&other.value.wallclock()))
         }
     }
 }
 impl VersionedCrdsValue {
-    pub fn new(local_timestamp: u64, value: CrdsValue) -> Self {
-        let value_hash = hash(&serialize(&value).unwrap());
+    pub fn new(local_timestamp: u64, value: SignedCrdsValue) -> Self {
         VersionedCrdsValue {
             value,
             insert_timestamp: local_timestamp,
             local_timestamp,
-            value_hash,
         }
+    }
+    pub fn value_hash(&self) -> &[u8;32] {
+        &self.value.sig[0..32]
     }
 }
 
@@ -89,7 +86,7 @@ impl Default for Crds {
 
 impl Crds {
     /// must be called atomically with `insert_versioned`
-    pub fn new_versioned(&self, local_timestamp: u64, value: CrdsValue) -> VersionedCrdsValue {
+    pub fn new_versioned(&self, local_timestamp: u64, value: SignedCrdsValue) -> VersionedCrdsValue {
         VersionedCrdsValue::new(local_timestamp, value)
     }
     /// insert the new value, returns the old value if insert succeeds
@@ -114,13 +111,13 @@ impl Crds {
     }
     pub fn insert(
         &mut self,
-        value: CrdsValue,
+        value: SignedCrdsValue,
         local_timestamp: u64,
     ) -> Result<Option<VersionedCrdsValue>, CrdsError> {
         let new_value = self.new_versioned(local_timestamp, value);
         self.insert_versioned(new_value)
     }
-    pub fn lookup(&self, label: &CrdsValueLabel) -> Option<&CrdsValue> {
+    pub fn lookup(&self, label: &CrdsValueLabel) -> Option<&SignedCrdsValue> {
         self.table.get(label).map(|x| &x.value)
     }
 
@@ -268,7 +265,7 @@ mod test {
 
         assert_eq!(v1.value.label(), v2.value.label());
         assert_eq!(v1.value.wallclock(), v2.value.wallclock());
-        assert_ne!(v1.value_hash, v2.value_hash);
+        assert_ne!(v1.value_hash(), v2.value_hash());
         assert!(v1 != v2);
         assert!(!(v1 == v2));
         if v1 > v2 {

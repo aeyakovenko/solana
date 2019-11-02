@@ -17,7 +17,7 @@ use crate::{
     crds_gossip::CrdsGossip,
     crds_gossip_error::CrdsGossipError,
     crds_gossip_pull::{CrdsFilter, CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS},
-    crds_value::{CrdsValue, CrdsValueLabel, EpochSlots, Vote},
+    crds_value::{SignedCrdsValue, CrdsValueLabel, EpochSlots, Vote},
     packet::{to_shared_blob, Blob, Packet, SharedBlob},
     repair_service::RepairType,
     result::{Error, Result},
@@ -165,9 +165,9 @@ struct PullData {
 #[allow(clippy::large_enum_variant)]
 enum Protocol {
     /// Gossip protocol messages
-    PullRequest(CrdsFilter, CrdsValue),
-    PullResponse(Pubkey, Vec<CrdsValue>),
-    PushMessage(Pubkey, Vec<CrdsValue>),
+    PullRequest(CrdsFilter, SignedCrdsValue),
+    PullResponse(Pubkey, Vec<SignedCrdsValue>),
+    PushMessage(Pubkey, Vec<SignedCrdsValue>),
     PruneMessage(Pubkey, PruneData),
 
     /// Window protocol messages
