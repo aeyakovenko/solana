@@ -66,7 +66,6 @@ impl Tower {
         &self,
         bank_slot: u64,
         vote_accounts: F,
-        ancestors: &HashMap<Slot, HashSet<u64>>,
     ) -> (HashMap<Slot, StakeLockout>, u64)
     where
         F: Iterator<Item = (Pubkey, (u64, Account))>,
@@ -112,7 +111,7 @@ impl Tower {
             let start_root = vote_state.root_slot;
 
             vote_state.process_slot_vote_unchecked(bank_slot);
-            let mut votes = vec![];
+            let mut votes:Vec<Lockout> = vec![];
             if start_root != vote_state.root_slot {
                 if let Some(root) = start_root {
                     let vote = Lockout {
@@ -129,9 +128,9 @@ impl Tower {
                 };
                 votes.push(vote);
             }
-            votes.extend(&vote_state.votes);
+            votes.extend(vote_state.votes.iter().cloned());
 
-            for (i, vote) in votes.enumerate() {
+            for (i, vote) in votes.iter().enumerate() {
                 Self::update_ancestor_lockouts(&mut stake_lockouts, vote, &votes[..i]);
             }
 
@@ -150,7 +149,7 @@ impl Tower {
             );
 
             if let Some(vote) = vote_state.nth_recent_vote(1) {
-                assert_eq!(votes[votes.len() - 2], vote);
+                assert_eq!(votes[votes.len() - 2], *vote);
                 // Update all the parents of this last vote with the stake of this vote account
                 Self::update_ancestor_stakes(
                     &mut stake_lockouts,
@@ -371,20 +370,19 @@ impl Tower {
         }
     }
 
-    fn bank_weight(&self, bank: &Bank, ancestors: &HashMap<Slot, HashSet<Slot>>) -> u128 {
+    fn bank_weight(&self, bank: &Bank) -> u128 {
         let (stake_lockouts, _) =
-            self.collect_vote_lockouts(bank.slot(), bank.vote_accounts().into_iter(), ancestors);
+            self.collect_vote_lockouts(bank.slot(), bank.vote_accounts().into_iter());
         self.calculate_weight(&stake_lockouts)
     }
 
     fn find_heaviest_bank(&self, bank_forks: &BankForks) -> Option<Arc<Bank>> {
-        let ancestors = bank_forks.ancestors();
         let mut bank_weights: Vec<_> = bank_forks
             .frozen_banks()
             .values()
             .map(|b| {
                 (
-                    self.bank_weight(b, &ancestors),
+                    self.bank_weight(b),
                     b.parents().len(),
                     b.clone(),
                 )
