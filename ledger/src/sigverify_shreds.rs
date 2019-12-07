@@ -351,6 +351,7 @@ pub fn sign_shreds_gpu(
     let sig_size = size_of::<Signature>();
     let api = perf_libs::api();
     if api.is_none() {
+        assert!(false);
         return sign_shreds_cpu(batches, slot_leaders_pubkeys, slot_leaders_privkeys);
     }
     let slot_leaders_secrets: HashMap<u64, Signature> = slot_leaders_privkeys

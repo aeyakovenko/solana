@@ -669,8 +669,7 @@ impl Shredder {
             .map(|s| (*s, self.keypair.secret.to_bytes()))
             .collect();
         privkeys.insert(std::u64::MAX, [0u8; 32]);
-        //sigverify_shreds::sign_shreds_gpu(&mut data_shreds, &pubkeys, &privkeys, recycler_cache);
-        sigverify_shreds::sign_shreds_cpu(&mut data_shreds, &pubkeys, &privkeys);
+        sigverify_shreds::sign_shreds_gpu(&mut data_shreds, &pubkeys, &privkeys, recycler_cache);
         let sign_data_time = now.elapsed().as_micros();
 
         let now = Instant::now();
@@ -694,8 +693,7 @@ impl Shredder {
         let gen_coding_time = now.elapsed().as_micros();
 
         let now = Instant::now();
-        //sigverify_shreds::sign_shreds_gpu(&mut coding_shreds, &pubkeys, &privkeys, recycler_cache);
-        sigverify_shreds::sign_shreds_cpu(&mut coding_shreds, &pubkeys, &privkeys);
+        sigverify_shreds::sign_shreds_gpu(&mut coding_shreds, &pubkeys, &privkeys, recycler_cache);
         let sign_coding_time = now.elapsed().as_micros();
 
         datapoint_debug!(
