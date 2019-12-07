@@ -1592,6 +1592,7 @@ pub mod tests {
 
     #[test]
     fn test_multi_fec_block_coding() {
+        solana_logger::setup();
         let recycler_cache = RecyclerCache::default();
         let keypair = Arc::new(Keypair::new());
         let slot = 0x123456789abcdef0;

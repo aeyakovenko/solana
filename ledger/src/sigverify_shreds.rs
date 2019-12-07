@@ -446,6 +446,12 @@ pub fn sign_shreds_gpu(
     trace!("done sign");
     let mut sizes: Vec<usize> = vec![0];
     sizes.extend(batches.iter().map(|b| b.packets.len()));
+    for i in 0..sizes.len() {
+        if i == 0 {
+            continue;
+        }
+        sizes[i] += sizes[i - 1];
+    }
     PAR_THREAD_POOL.with(|thread_pool| {
         thread_pool.borrow().install(|| {
             batches
@@ -453,9 +459,8 @@ pub fn sign_shreds_gpu(
                 .enumerate()
                 .for_each(|(batch_ix, batch)| {
                     let num_packets = sizes[batch_ix];
-                    batch
-                        .packets
-                        .iter_mut()
+                    batch.packets[..]
+                        .par_iter_mut()
                         .enumerate()
                         .for_each(|(packet_ix, packet)| {
                             let sig_ix = packet_ix + num_packets;
