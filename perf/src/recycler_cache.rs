@@ -3,7 +3,7 @@ use crate::packet::PacketsRecycler;
 use crate::recycler::Recycler;
 use crate::sigverify::TxOffset;
 
-pub const PACKETS_CAPACITY: usize = 1024;
+pub const PACKETS_CAPACITY: usize = 32;
 
 #[derive(Default, Clone)]
 pub struct RecyclerCache {
