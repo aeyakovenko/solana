@@ -686,6 +686,14 @@ impl Shredder {
                             shred_data_batch,
                             self.version,
                         )
+                        //let mut packets = Packets::new_with_recycler(
+                        //    recycler_cache.packets().clone(),
+                        //    PACKETS_CAPACITY as usize,
+                        //    "coding shreds",
+                        //);
+                        //packets.packets.resize(PACKETS_CAPACITY, Packet::default());
+                        //Some(packets)
+
                     })
                     .collect()
             })

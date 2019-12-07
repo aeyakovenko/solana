@@ -51,6 +51,12 @@ fn bench_shredder_large_entries(bencher: &mut Bencher) {
     let txs_per_entry = 128;
     let num_entries = max_entries_per_n_shred(&make_test_entry(txs_per_entry), num_shreds as u64);
     let entries = make_large_unchained_entries(txs_per_entry, num_entries);
+    //warmup recycler
+    for _ in 0..100 {
+        let shredder = Shredder::new(1, 0, RECOMMENDED_FEC_RATE, kp.clone(), 0, 0).unwrap();
+        shredder.entries_to_shreds(&recycler, &entries, true, 0);
+    }
+
     // 1Mb
     bencher.iter(|| {
         let shredder = Shredder::new(1, 0, RECOMMENDED_FEC_RATE, kp.clone(), 0, 0).unwrap();
