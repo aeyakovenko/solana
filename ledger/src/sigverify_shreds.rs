@@ -415,8 +415,6 @@ pub fn sign_shreds_gpu(
             elems: p.packets.as_ptr(),
             num: p.packets.len() as u32,
         });
-        let mut v = Vec::new();
-        v.resize(p.packets.len(), 0);
         num_packets += p.packets.len();
     }
 

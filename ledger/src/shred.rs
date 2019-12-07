@@ -183,23 +183,28 @@ impl ShredHeaders {
             _ => std::u64::MAX,
         }
     }
-    pub fn slot(&self) -> Slot {
+
+    pub fn common_header(&self) -> &ShredCommonHeader {
         match self {
-            ShredHeaders::Data { common_header, .. } => common_header.slot,
-            ShredHeaders::Coding { common_header, .. } => common_header.slot,
+            ShredHeaders::Data { common_header, .. } => common_header,
+            ShredHeaders::Coding { common_header, .. } => common_header
         }
+    }
+
+    pub fn data_header(&self) -> Option<&DataShredHeader> {
+        match self {
+            ShredHeaders::Data { data_header, .. } => Some(data_header),
+            ShredHeaders::Coding { .. } => None
+        }
+    }
+    pub fn slot(&self) -> Slot {
+        self.common_header().slot
     }
     pub fn seed(&self) -> [u8; 32] {
-        match self {
-            ShredHeaders::Data { common_header, .. } => common_header.seed(),
-            ShredHeaders::Coding { common_header, .. } => common_header.seed(),
-        }
+        self.common_header().seed()
     }
     pub fn version(&self) -> u16 {
-        match self {
-            ShredHeaders::Data { common_header, .. } => common_header.version,
-            ShredHeaders::Coding { common_header, .. } => common_header.version,
-        }
+        self.common_header().version
     }
 }
 
@@ -266,7 +271,7 @@ impl Shred {
         packet.meta.size = len;
     }
 
-    pub fn new_from_data(
+    pub fn into_payload(
         slot: Slot,
         index: u32,
         parent_offset: u16,
@@ -275,8 +280,8 @@ impl Shred {
         is_last_in_slot: bool,
         reference_tick: u8,
         version: u16,
-    ) -> Self {
-        let mut payload = vec![0; PACKET_DATA_SIZE];
+        payload: &mut [u8],
+    ) -> ShredHeaders {
         let common_header = ShredCommonHeader {
             slot,
             index,
@@ -301,14 +306,14 @@ impl Shred {
         Self::serialize_obj_into(
             &mut start,
             SIZE_OF_COMMON_SHRED_HEADER,
-            &mut payload,
+            payload,
             &common_header,
         )
         .expect("Failed to write header into shred buffer");
         Self::serialize_obj_into(
             &mut start,
             SIZE_OF_DATA_SHRED_HEADER,
-            &mut payload,
+            payload,
             &data_header,
         )
         .expect("Failed to write data header into shred buffer");
@@ -317,9 +322,37 @@ impl Shred {
             payload[start..start + data.len()].clone_from_slice(data);
         }
 
-        Self {
+        ShredHeaders::Data{
             common_header,
             data_header,
+        }
+    }
+
+
+    pub fn new_from_data(
+        slot: Slot,
+        index: u32,
+        parent_offset: u16,
+        data: Option<&[u8]>,
+        is_last_data: bool,
+        is_last_in_slot: bool,
+        reference_tick: u8,
+        version: u16,
+    ) -> Self {
+        let mut payload = vec![0; PACKET_DATA_SIZE];
+        let headers = Self::into_payload(
+                slot,
+                index,
+                parent_offset,
+                data,
+                is_last_data,
+                is_last_in_slot,
+                reference_tick,
+                version,
+                &mut payload);
+        Self {
+            common_header: headers.common_header().clone(),
+            data_header: headers.data_header().unwrap().clone(),
             coding_header: CodingShredHeader::default(),
             payload,
         }
@@ -592,8 +625,10 @@ impl Shredder {
                                     (false, false)
                                 }
                             };
-
-                            let shred = Shred::new_from_data(
+                            let len = packets.packets.len();
+                            packets.packets.resize(len + 1, Packet::default());
+                            let payload = &mut packets.packets[len];
+                            let _= Shred::into_payload(
                                 self.slot,
                                 shred_index,
                                 (self.slot - self.parent_slot) as u16,
@@ -602,10 +637,8 @@ impl Shredder {
                                 is_last_in_slot,
                                 self.reference_tick,
                                 self.version,
+                                &mut payload.data,
                             );
-                            let mut p = Packet::default();
-                            shred.copy_to_packet(&mut p);
-                            packets.packets.push(p);
                         }
                         packets.packets.resize(chunk.len(), Packet::default());
                         packets
