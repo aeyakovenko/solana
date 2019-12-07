@@ -351,7 +351,6 @@ pub fn sign_shreds_gpu(
     let sig_size = size_of::<Signature>();
     let api = perf_libs::api();
     if api.is_none() {
-        assert!(false);
         return sign_shreds_cpu(batches, slot_leaders_pubkeys, slot_leaders_privkeys);
     }
     let slot_leaders_secrets: HashMap<u64, Signature> = slot_leaders_privkeys
@@ -624,11 +623,11 @@ pub mod tests {
         let num_batches = 100;
         let slot = 0xdeadc0de;
         packets.packets.resize(num_packets, Packet::default());
-        for p in packets.packets.iter_mut() {
+        for (i, p) in packets.packets.iter_mut().enumerate() {
             let shred = Shred::new_from_data(
                 slot,
                 0xc0de,
-                0xdead,
+                i as u16,
                 Some(&[5; SIZE_OF_DATA_SHRED_PAYLOAD]),
                 true,
                 true,
