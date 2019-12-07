@@ -14,9 +14,12 @@ fn bench_sigverify_shreds_sign_gpu(bencher: &mut Bencher) {
     let recycler_cache = RecyclerCache::default();
 
     let mut packets = Packets::default();
+    packets.packets.set_pinnable();
     let num_packets = 32;
     let num_batches = 100;
     let slot = 0xdeadc0de;
+    // need to pin explicitly since the resize will not cause re-allocation
+    packets.packets.reserve_and_pin(num_packets);
     packets.packets.resize(num_packets, Packet::default());
     for p in packets.packets.iter_mut() {
         let shred = Shred::new_from_data(

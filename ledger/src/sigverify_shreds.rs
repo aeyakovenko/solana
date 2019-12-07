@@ -470,9 +470,11 @@ pub fn sign_shreds_gpu(
         });
     });
     inc_new_counter_debug!("ed25519_shred_sign_gpu", count);
+    recycler_cache.buffer().recycle(secrets);
     recycler_cache.buffer().recycle(signatures_out);
     recycler_cache.buffer().recycle(pubkeys);
     recycler_cache.offsets().recycle(signature_offsets);
+    recycler_cache.offsets().recycle(secret_offsets);
     recycler_cache.offsets().recycle(pubkey_offsets);
     recycler_cache.offsets().recycle(msg_sizes);
     recycler_cache.offsets().recycle(msg_start_offsets);
