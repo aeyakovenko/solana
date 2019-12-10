@@ -20,6 +20,8 @@ use solana_rayon_threadlimit::get_thread_count;
 use solana_sdk::signature::Signature;
 use std::{cell::RefCell, collections::HashMap, mem::size_of};
 
+pub const SIGN_SHRED_GPU_MIN: usize = 32;
+
 thread_local!(static PAR_THREAD_POOL: RefCell<ThreadPool> = RefCell::new(rayon::ThreadPoolBuilder::new()
                     .num_threads(get_thread_count())
                     .thread_name(|ix| format!("sigverify_shreds_{}", ix))
@@ -344,7 +346,8 @@ pub fn sign_shreds_gpu(
 ) {
     let sig_size = size_of::<Signature>();
     let api = perf_libs::api();
-    if api.is_none() {
+    let count = batch_size(batches);
+    if api.is_none() || count < SIGN_SHRED_GPU_MIN {
         return sign_shreds_cpu(batches, slot_leaders_pubkeys, slot_leaders_privkeys);
     }
     let slot_leaders_secrets: HashMap<u64, Signature> = slot_leaders_privkeys
@@ -367,7 +370,6 @@ pub fn sign_shreds_gpu(
     let api = api.unwrap();
 
     let mut elems = Vec::new();
-    let count = batch_size(batches);
     let mut offset: usize = 0;
     let mut num_packets = 0;
     let (pubkeys, pubkey_offsets, num_pubkey_packets) =

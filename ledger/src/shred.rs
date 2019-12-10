@@ -15,7 +15,6 @@ use rayon::{
 use serde::{Deserialize, Serialize};
 use solana_metrics::datapoint_debug;
 use solana_perf::packet::batch_size;
-use solana_perf::packet::limited_deserialize;
 use solana_perf::packet::Packets;
 use solana_perf::recycler_cache::{RecyclerCache, PACKETS_CAPACITY};
 use solana_rayon_threadlimit::get_thread_count;
@@ -27,7 +26,6 @@ use solana_sdk::{
     signature::{Keypair, KeypairUtil, Signature},
 };
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::{sync::Arc, time::Instant};
 use thiserror::Error;
 
@@ -96,11 +94,15 @@ pub struct ShredCommonHeader {
     pub version: u16,
 }
 impl ShredCommonHeader {
+    pub fn read_packet(start: &mut usize, packet: &Packet) -> Result<Self> {
+        let common_header: ShredCommonHeader =
+            Shred::deserialize_obj(start, SIZE_OF_COMMON_SHRED_HEADER, &packet.data)?;
+        Ok(common_header)
+    }
+
     pub fn from_packet(packet: &Packet) -> Result<Self> {
         let mut start = 0;
-        let common_header: ShredCommonHeader =
-            Shred::deserialize_obj(&mut start, SIZE_OF_COMMON_SHRED_HEADER, &packet.data)?;
-        Ok(common_header)
+        Self::read_packet(&mut start, packet)
     }
     pub fn seed(&self) -> [u8; 32] {
         let mut seed = [0; 32];
@@ -141,8 +143,7 @@ pub enum ShredHeaders {
 impl ShredHeaders {
     pub fn from_packet(packet: &Packet) -> Result<Self> {
         let mut start = 0;
-        let common_header: ShredCommonHeader =
-            Shred::deserialize_obj(&mut start, SIZE_OF_COMMON_SHRED_HEADER, &packet.data)?;
+        let common_header = ShredCommonHeader::read_packet(&mut start, packet)?;
         if common_header.shred_type == ShredType(DATA_SHRED) {
             let data_header: DataShredHeader =
                 Shred::deserialize_obj(&mut start, SIZE_OF_DATA_SHRED_HEADER, &packet.data)?;
@@ -627,24 +628,6 @@ impl Shredder {
         (data_shreds, last_shred_index)
     }
 
-    pub fn read_slots(batches: &[Packets]) -> HashSet<u64> {
-        batches
-            .iter()
-            .flat_map(|batch| {
-                batch.packets.iter().filter_map(|packet| {
-                    let slot_start = size_of::<Signature>() + size_of::<ShredType>();
-                    let slot_end = slot_start + size_of::<u64>();
-                    trace!("slot {} {}", slot_start, slot_end,);
-                    if slot_end <= packet.meta.size {
-                        limited_deserialize(&packet.data[slot_start..slot_end]).ok()
-                    } else {
-                        None
-                    }
-                })
-            })
-            .collect()
-    }
-
     pub fn entries_to_shreds(
         &self,
         recycler_cache: &RecyclerCache,
@@ -660,17 +643,14 @@ impl Shredder {
         );
 
         let now = Instant::now();
-        let slots = Self::read_slots(&data_shreds);
-        let mut pubkeys: HashMap<u64, [u8; 32]> = slots
-            .iter()
-            .map(|s| (*s, self.keypair.pubkey().to_bytes()))
-            .collect();
+        let mut pubkeys: HashMap<u64, [u8; 32]> = HashMap::new();
+        let mut privkeys: HashMap<u64, [u8; 32]> = HashMap::new();
+        //default value is necessary in case GPU is unable to parse the packet
         pubkeys.insert(std::u64::MAX, [0u8; 32]);
-        let mut privkeys: HashMap<u64, [u8; 32]> = slots
-            .iter()
-            .map(|s| (*s, self.keypair.secret.to_bytes()))
-            .collect();
         privkeys.insert(std::u64::MAX, [0u8; 32]);
+        //key values
+        pubkeys.insert(self.slot, self.keypair.pubkey().to_bytes());
+        privkeys.insert(self.slot, self.keypair.secret.to_bytes());
         sigverify_shreds::sign_shreds_gpu(&mut data_shreds, &pubkeys, &privkeys, recycler_cache);
         let sign_data_time = now.elapsed().as_micros();
 
@@ -688,13 +668,6 @@ impl Shredder {
                             shred_data_batch,
                             self.version,
                         )
-                        //let mut packets = Packets::new_with_recycler(
-                        //    recycler_cache.packets().clone(),
-                        //    PACKETS_CAPACITY as usize,
-                        //    "coding shreds",
-                        //);
-                        //packets.packets.resize(PACKETS_CAPACITY, Packet::default());
-                        //Some(packets)
                     })
                     .collect()
             })
@@ -758,6 +731,9 @@ impl Shredder {
         data_shred_batch: &Packets,
         version: u16,
     ) -> Option<Packets> {
+        if fec_rate == 0.0 {
+            return None;
+        }
         // Create empty coding shreds, with correctly populated headers
         let mut coding_shreds = Packets::new_with_recycler(
             recycler_cache.packets().clone(),
@@ -823,11 +799,7 @@ impl Shredder {
                 .encode(&data_ptrs, coding_ptrs.as_mut_slice())
                 .expect("Failed in erasure encode");
         }
-        if fec_rate != 0.0 {
-            Some(coding_shreds)
-        } else {
-            None
-        }
+        Some(coding_shreds)
     }
 
     fn calculate_num_coding_shreds(num_data_shreds: f32, fec_rate: f32) -> usize {
@@ -1649,45 +1621,6 @@ pub mod tests {
         ];
         let version = Shred::version_from_hash(&Hash::new(&hash));
         assert_eq!(version, 0x5a5a);
-    }
-    #[test]
-    fn test_read_slots() {
-        solana_logger::setup();
-        let mut shred = Shred::new_from_data(
-            0xdeadc0de,
-            0xc0de,
-            0xdead,
-            Some(&[1, 2, 3, 4]),
-            true,
-            true,
-            0,
-            0,
-        );
-        let mut batch = [Packets::default(), Packets::default()];
-
-        let keypair = Keypair::new();
-        Shredder::sign_shred(&keypair, &mut shred);
-        batch[0].packets.resize(1, Packet::default());
-        batch[0].packets[0].data[0..shred.payload.len()].copy_from_slice(&shred.payload);
-        batch[0].packets[0].meta.size = shred.payload.len();
-
-        let mut shred = Shred::new_from_data(
-            0xc0dedead,
-            0xc0de,
-            0xdead,
-            Some(&[1, 2, 3, 4]),
-            true,
-            true,
-            0,
-            0,
-        );
-        Shredder::sign_shred(&keypair, &mut shred);
-        batch[1].packets.resize(1, Packet::default());
-        batch[1].packets[0].data[0..shred.payload.len()].copy_from_slice(&shred.payload);
-        batch[1].packets[0].meta.size = shred.payload.len();
-
-        let expected: HashSet<u64> = [0xc0dedead, 0xdeadc0de].iter().cloned().collect();
-        assert_eq!(Shredder::read_slots(&batch), expected);
     }
 
     #[test]
