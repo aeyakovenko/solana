@@ -33,7 +33,8 @@ fn test_multi_fec_block_coding() {
         .collect();
 
     let serialized_entries = bincode::serialize(&entries).unwrap();
-    let (data_shreds, coding_shreds, next_index) = shredder.entries_to_shreds(&entries, true, 0);
+    let (data_shreds, coding_shreds, next_index) =
+        shredder.test_entries_to_shreds(&entries, true, 0);
     assert_eq!(next_index as usize, num_data_shreds);
     assert_eq!(data_shreds.len(), num_data_shreds);
     assert_eq!(coding_shreds.len(), num_data_shreds);

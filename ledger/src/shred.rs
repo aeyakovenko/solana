@@ -628,6 +628,20 @@ impl Shredder {
         (data_shreds, last_shred_index)
     }
 
+    pub fn test_entries_to_shreds(
+        &self,
+        entries: &[Entry],
+        is_last_in_slot: bool,
+        next_shred_index: u32,
+    ) -> (Vec<Shred>, Vec<Shred>, u32) {
+        let recycler_cache = RecyclerCache::default();
+        let (data, coding, sz) =
+            self.entries_to_shreds(&recycler_cache, entries, is_last_in_slot, next_shred_index);
+        let data = Shred::from_packets(data);
+        let coding = Shred::from_packets(coding);
+        (data, coding, sz)
+    }
+
     pub fn entries_to_shreds(
         &self,
         recycler_cache: &RecyclerCache,

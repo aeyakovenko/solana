@@ -4686,7 +4686,6 @@ pub mod tests {
         num_entries: u64,
         erasure_rate: f32,
     ) -> (Vec<Shred>, Vec<Shred>, Arc<LeaderScheduleCache>) {
-        let recycler_cache = RecyclerCache::default();
         let entries = make_slot_entries_with_transactions(num_entries);
         let leader_keypair = Arc::new(Keypair::new());
         let shredder = Shredder::new(
@@ -4698,8 +4697,7 @@ pub mod tests {
             0,
         )
         .expect("Failed in creating shredder");
-        let (data_shreds, coding_shreds, _) =
-            shredder.entries_to_shreds(&recycler_cache, &entries, true, 0);
+        let (data_shreds, coding_shreds, _) = shredder.test_entries_to_shreds(&entries, true, 0);
 
         let genesis_config = create_genesis_config(2).genesis_config;
         let bank = Arc::new(Bank::new(&genesis_config));
@@ -4712,11 +4710,7 @@ pub mod tests {
         };
         leader_schedule_cache.set_fixed_leader_schedule(Some(fixed_schedule));
 
-        (
-            Shred::from_packets(data_shreds),
-            Shred::from_packets(coding_shreds),
-            Arc::new(leader_schedule_cache),
-        )
+        (data_shreds, coding_shreds, Arc::new(leader_schedule_cache))
     }
 
     fn verify_index_integrity(blocktree: &Blocktree, slot: u64) {
