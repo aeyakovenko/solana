@@ -161,7 +161,9 @@ impl<'a, T: Clone + Send + Sync + Default + Sized> IntoParallelIterator for &'a 
     }
 }
 
-impl<'a, T: Clone + Default + Sized + Send + Sync> IntoParallelRefMutIterator<'a> for &'a mut PinnedVec<T> {
+impl<'a, T: Clone + Default + Sized + Send + Sync> IntoParallelRefMutIterator<'a>
+    for &'a mut PinnedVec<T>
+{
     type Iter = rayon::slice::IterMut<'a, T>;
     type Item = &'a mut T;
     fn par_iter_mut(&'a mut self) -> Self::Iter {

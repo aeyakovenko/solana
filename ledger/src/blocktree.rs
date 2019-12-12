@@ -4519,7 +4519,7 @@ pub mod tests {
         {
             let blocktree = Blocktree::open(&blocktree_path).unwrap();
             blocktree
-                .insert_shreds(coding_shreds, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(coding_shreds, Some(&leader_schedule_cache), false)
                 .unwrap();
             let shred_bufs: Vec<_> = data_shreds
                 .iter()
@@ -4560,21 +4560,21 @@ pub mod tests {
                 .chain(coding_shreds.iter().cloned())
                 .collect();
             blocktree
-                .insert_shreds(all_shreds, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(all_shreds, Some(&leader_schedule_cache), false)
                 .unwrap();
             verify_index_integrity(&blocktree, slot);
             blocktree.purge_slots(0, Some(slot));
 
             // Test inserting just the codes, enough for recovery
             blocktree
-                .insert_shreds(coding_shreds.clone(), Some(&leader_schedule_cache), false)
+                .insert_test_shreds(coding_shreds.clone(), Some(&leader_schedule_cache), false)
                 .unwrap();
             verify_index_integrity(&blocktree, slot);
             blocktree.purge_slots(0, Some(slot));
 
             // Test inserting some codes, but not enough for recovery
             blocktree
-                .insert_shreds(
+                .insert_test_shreds(
                     coding_shreds[..coding_shreds.len() - 1].to_vec(),
                     Some(&leader_schedule_cache),
                     false,
@@ -4590,7 +4590,7 @@ pub mod tests {
                 .chain(coding_shreds[..coding_shreds.len() - 1].iter().cloned())
                 .collect();
             blocktree
-                .insert_shreds(shreds, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(shreds, Some(&leader_schedule_cache), false)
                 .unwrap();
             verify_index_integrity(&blocktree, slot);
             blocktree.purge_slots(0, Some(slot));
@@ -4602,7 +4602,7 @@ pub mod tests {
                 .chain(coding_shreds[..coding_shreds.len() / 2 - 1].iter().cloned())
                 .collect();
             blocktree
-                .insert_shreds(shreds, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(shreds, Some(&leader_schedule_cache), false)
                 .unwrap();
             verify_index_integrity(&blocktree, slot);
             blocktree.purge_slots(0, Some(slot));
@@ -4619,10 +4619,10 @@ pub mod tests {
                 .chain(coding_shreds[coding_shreds.len() / 2 - 1..].iter().cloned())
                 .collect();
             blocktree
-                .insert_shreds(shreds1, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(shreds1, Some(&leader_schedule_cache), false)
                 .unwrap();
             blocktree
-                .insert_shreds(shreds2, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(shreds2, Some(&leader_schedule_cache), false)
                 .unwrap();
             verify_index_integrity(&blocktree, slot);
             blocktree.purge_slots(0, Some(slot));
@@ -4644,10 +4644,10 @@ pub mod tests {
                 )
                 .collect();
             blocktree
-                .insert_shreds(shreds1, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(shreds1, Some(&leader_schedule_cache), false)
                 .unwrap();
             blocktree
-                .insert_shreds(shreds2, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(shreds2, Some(&leader_schedule_cache), false)
                 .unwrap();
             verify_index_integrity(&blocktree, slot);
             blocktree.purge_slots(0, Some(slot));
@@ -4669,10 +4669,10 @@ pub mod tests {
                 )
                 .collect();
             blocktree
-                .insert_shreds(shreds1, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(shreds1, Some(&leader_schedule_cache), false)
                 .unwrap();
             blocktree
-                .insert_shreds(shreds2, Some(&leader_schedule_cache), false)
+                .insert_test_shreds(shreds2, Some(&leader_schedule_cache), false)
                 .unwrap();
             verify_index_integrity(&blocktree, slot);
             blocktree.purge_slots(0, Some(slot));
@@ -4686,6 +4686,7 @@ pub mod tests {
         num_entries: u64,
         erasure_rate: f32,
     ) -> (Vec<Shred>, Vec<Shred>, Arc<LeaderScheduleCache>) {
+        let recycler_cache = RecyclerCache::default();
         let entries = make_slot_entries_with_transactions(num_entries);
         let leader_keypair = Arc::new(Keypair::new());
         let shredder = Shredder::new(
@@ -4697,7 +4698,8 @@ pub mod tests {
             0,
         )
         .expect("Failed in creating shredder");
-        let (data_shreds, coding_shreds, _) = shredder.entries_to_shreds(&entries, true, 0);
+        let (data_shreds, coding_shreds, _) =
+            shredder.entries_to_shreds(&recycler_cache, &entries, true, 0);
 
         let genesis_config = create_genesis_config(2).genesis_config;
         let bank = Arc::new(Bank::new(&genesis_config));
@@ -4710,7 +4712,11 @@ pub mod tests {
         };
         leader_schedule_cache.set_fixed_leader_schedule(Some(fixed_schedule));
 
-        (data_shreds, coding_shreds, Arc::new(leader_schedule_cache))
+        (
+            Shred::from_packets(data_shreds),
+            Shred::from_packets(coding_shreds),
+            Arc::new(leader_schedule_cache),
+        )
     }
 
     fn verify_index_integrity(blocktree: &Blocktree, slot: u64) {
