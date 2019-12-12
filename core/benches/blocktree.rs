@@ -17,6 +17,7 @@ use solana_sdk::{
     hash::Hash,
     signature::{Keypair, KeypairUtil},
 };
+use solana_ledger::sigverify_shreds::sign_shreds_gpu_pinned_keypair;
 use std::path::Path;
 use std::sync::Arc;
 use test::Bencher;
@@ -24,7 +25,9 @@ use test::Bencher;
 // Given some shreds and a ledger at ledger_path, benchmark writing the shreds to the ledger
 fn bench_write_shreds(bench: &mut Bencher, entries: Vec<Entry>, ledger_path: &Path) {
     let cache = RecyclerCache::warmed();
-    let shredder = Shredder::new(0, 0, 0.0, Arc::new(Keypair::new()), 0, 0).expect("shredder");
+    let kp = Arc::new(Keypair::new());
+    let pkp = Some(Arc::new(sign_shreds_gpu_pinned_keypair(&kp, &cache)));
+    let shredder = Shredder::new(0, 0, 0.0, kp, pkp, 0, 0).expect("shredder");
     let blocktree =
         Blocktree::open(ledger_path).expect("Expected to be able to open database ledger");
     bench.iter(move || {
