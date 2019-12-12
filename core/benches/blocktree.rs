@@ -5,6 +5,7 @@ extern crate solana_ledger;
 extern crate test;
 
 use rand::Rng;
+use solana_ledger::sigverify_shreds::sign_shreds_gpu_pinned_keypair;
 use solana_ledger::{
     blocktree::{entries_to_test_shreds, Blocktree},
     entry::{create_ticks, Entry},
@@ -17,7 +18,6 @@ use solana_sdk::{
     hash::Hash,
     signature::{Keypair, KeypairUtil},
 };
-use solana_ledger::sigverify_shreds::sign_shreds_gpu_pinned_keypair;
 use std::path::Path;
 use std::sync::Arc;
 use test::Bencher;

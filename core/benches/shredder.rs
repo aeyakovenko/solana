@@ -3,11 +3,11 @@
 extern crate test;
 
 use solana_ledger::entry::{create_ticks, Entry};
-use solana_ledger::sigverify_shreds::sign_shreds_gpu_pinned_keypair;
 use solana_ledger::shred::{
     max_entries_per_n_shred, max_ticks_per_n_shreds, Shred, Shredder, RECOMMENDED_FEC_RATE,
     SIZE_OF_DATA_SHRED_PAYLOAD,
 };
+use solana_ledger::sigverify_shreds::sign_shreds_gpu_pinned_keypair;
 use solana_perf::recycler_cache::RecyclerCache;
 use solana_perf::test_tx;
 use solana_sdk::hash::Hash;
@@ -39,7 +39,8 @@ fn bench_shredder_ticks(bencher: &mut Bencher) {
     let num_ticks = max_ticks_per_n_shreds(1) * num_shreds as u64;
     let entries = create_ticks(num_ticks, 0, Hash::default());
     bencher.iter(|| {
-        let shredder = Shredder::new(1, 0, RECOMMENDED_FEC_RATE, kp.clone(), pkp.clone(), 0, 0).unwrap();
+        let shredder =
+            Shredder::new(1, 0, RECOMMENDED_FEC_RATE, kp.clone(), pkp.clone(), 0, 0).unwrap();
         shredder.entries_to_shreds(&recycler, &entries, true, 0);
     })
 }
@@ -56,13 +57,15 @@ fn bench_shredder_large_entries(bencher: &mut Bencher) {
     let entries = make_large_unchained_entries(txs_per_entry, num_entries);
     //warmup recycler
     for _ in 0..100 {
-        let shredder = Shredder::new(1, 0, RECOMMENDED_FEC_RATE, kp.clone(), pkp.clone(), 0, 0).unwrap();
+        let shredder =
+            Shredder::new(1, 0, RECOMMENDED_FEC_RATE, kp.clone(), pkp.clone(), 0, 0).unwrap();
         shredder.entries_to_shreds(&recycler, &entries, true, 0);
     }
 
     // 1Mb
     bencher.iter(|| {
-        let shredder = Shredder::new(1, 0, RECOMMENDED_FEC_RATE, kp.clone(), pkp.clone(), 0, 0).unwrap();
+        let shredder =
+            Shredder::new(1, 0, RECOMMENDED_FEC_RATE, kp.clone(), pkp.clone(), 0, 0).unwrap();
         shredder.entries_to_shreds(&recycler, &entries, true, 0);
     })
 }
