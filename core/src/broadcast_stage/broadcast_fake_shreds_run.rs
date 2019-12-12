@@ -49,6 +49,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
             bank.parent().unwrap().slot(),
             RECOMMENDED_FEC_RATE,
             keypair.clone(),
+            None,
             (bank.tick_height() % bank.ticks_per_slot()) as u8,
             self.shred_version,
         )

@@ -3,15 +3,17 @@
 extern crate test;
 use solana_ledger::shred::Shred;
 use solana_ledger::shred::SIZE_OF_DATA_SHRED_PAYLOAD;
-use std::sync::Arc;
-use solana_ledger::sigverify_shreds::{sign_shreds_cpu, sign_shreds_gpu_pinned_keypair, sign_shreds_gpu};
+use solana_ledger::sigverify_shreds::{
+    sign_shreds_cpu, sign_shreds_gpu, sign_shreds_gpu_pinned_keypair,
+};
 use solana_perf::packet::{Packet, Packets};
 use solana_perf::recycler_cache::RecyclerCache;
 use solana_sdk::signature::{Keypair, KeypairUtil};
+use std::sync::Arc;
 use test::Bencher;
 
-const NUM_PACKETS:usize = 256;
-const NUM_BATCHES:usize = 1;
+const NUM_PACKETS: usize = 256;
+const NUM_BATCHES: usize = 1;
 #[bench]
 fn bench_sigverify_shreds_sign_gpu(bencher: &mut Bencher) {
     let recycler_cache = RecyclerCache::default();

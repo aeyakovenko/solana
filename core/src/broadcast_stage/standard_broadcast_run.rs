@@ -3,6 +3,8 @@ use super::*;
 use crate::broadcast_stage::broadcast_utils::UnfinishedSlotInfo;
 use solana_ledger::entry::Entry;
 use solana_ledger::shred::{Shred, Shredder, RECOMMENDED_FEC_RATE, SHRED_TICK_REFERENCE_MASK};
+use solana_ledger::sigverify_shreds::sign_shreds_gpu_pinned_keypair;
+use solana_perf::cuda_runtime::PinnedVec;
 use solana_perf::packet::Packets;
 use solana_perf::recycler_cache::RecyclerCache;
 use solana_sdk::packet::Packet;
@@ -46,7 +48,7 @@ pub(super) struct StandardBroadcastRun {
 impl StandardBroadcastRun {
     pub(super) fn new(keypair: Arc<Keypair>, shred_version: u16) -> Self {
         let recycler_cache = RecyclerCache::warmed();
-        let pinned_keypair = Arc::new(sign_shred_gpu_pinned_keypair(keypair, &recycler_ache));
+        let pinned_keypair = Arc::new(sign_shreds_gpu_pinned_keypair(&keypair, &recycler_cache));
         Self {
             stats: BroadcastStats::default(),
             unfinished_slot: None,
@@ -55,7 +57,7 @@ impl StandardBroadcastRun {
             keypair,
             pinned_keypair,
             shred_version,
-            recycler_cache:
+            recycler_cache,
         }
     }
 
@@ -104,6 +106,7 @@ impl StandardBroadcastRun {
             parent_slot,
             RECOMMENDED_FEC_RATE,
             self.keypair.clone(),
+            Some(self.pinned_keypair.clone()),
             reference_tick,
             self.shred_version,
         )

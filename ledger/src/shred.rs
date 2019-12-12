@@ -12,9 +12,9 @@ use rayon::{
     slice::ParallelSlice,
     ThreadPool,
 };
-use solana_perf::cuda_runtime::PinnedVec;
 use serde::{Deserialize, Serialize};
 use solana_metrics::datapoint_debug;
+use solana_perf::cuda_runtime::PinnedVec;
 use solana_perf::packet::batch_size;
 use solana_perf::packet::Packets;
 use solana_perf::recycler_cache::{RecyclerCache, PACKETS_CAPACITY};
@@ -661,7 +661,12 @@ impl Shredder {
 
         let now = Instant::now();
         //key values
-        sigverify_shreds::sign_shreds_gpu(&self.keypair, &self.pinned_keypair,&mut data_shreds, recycler_cache);
+        sigverify_shreds::sign_shreds_gpu(
+            &self.keypair,
+            &self.pinned_keypair,
+            &mut data_shreds,
+            recycler_cache,
+        );
         let sign_data_time = now.elapsed().as_micros();
 
         let now = Instant::now();
@@ -685,7 +690,12 @@ impl Shredder {
         let gen_coding_time = now.elapsed().as_micros();
 
         let now = Instant::now();
-        sigverify_shreds::sign_shreds_gpu(&self.keypair, &self.pinned_keypair, &mut coding_shreds, recycler_cache);
+        sigverify_shreds::sign_shreds_gpu(
+            &self.keypair,
+            &self.pinned_keypair,
+            &mut coding_shreds,
+            recycler_cache,
+        );
         let sign_coding_time = now.elapsed().as_micros();
 
         datapoint_debug!(
@@ -1243,8 +1253,16 @@ pub mod tests {
         let slot = 1;
 
         let parent_slot = 0;
-        let shredder = Shredder::new(slot, parent_slot, 0.0, keypair.clone(), None, u8::max_value(), 0)
-            .expect("Failed in creating shredder");
+        let shredder = Shredder::new(
+            slot,
+            parent_slot,
+            0.0,
+            keypair.clone(),
+            None,
+            u8::max_value(),
+            0,
+        )
+        .expect("Failed in creating shredder");
 
         let entries: Vec<_> = (0..5)
             .map(|_| {
@@ -1288,8 +1306,16 @@ pub mod tests {
             Err(ShredError::InvalidFecRate(_))
         );
 
-        let shredder = Shredder::new(0x123456789abcdef0, slot - 5, 1.0, keypair.clone(), None, 0, 0)
-            .expect("Failed in creating shredder");
+        let shredder = Shredder::new(
+            0x123456789abcdef0,
+            slot - 5,
+            1.0,
+            keypair.clone(),
+            None,
+            0,
+            0,
+        )
+        .expect("Failed in creating shredder");
 
         // Create enough entries to make > 1 shred
         let num_entries = max_ticks_per_n_shreds(1) + 1;
@@ -1589,8 +1615,8 @@ pub mod tests {
         let version = Shred::version_from_hash(&hash);
         let recycler_cache = RecyclerCache::default();
         assert_ne!(version, 0);
-        let shredder =
-            Shredder::new(0, 0, 1.0, keypair, None, 0, version).expect("Failed in creating shredder");
+        let shredder = Shredder::new(0, 0, 1.0, keypair, None, 0, version)
+            .expect("Failed in creating shredder");
 
         let entries: Vec<_> = (0..5)
             .map(|_| {

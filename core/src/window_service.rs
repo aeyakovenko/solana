@@ -312,7 +312,7 @@ mod test {
         keypair: &Arc<Keypair>,
     ) -> Vec<Shred> {
         let cache = RecyclerCache::default();
-        let shredder = Shredder::new(slot, parent, 0.0, keypair.clone(), 0, 0)
+        let shredder = Shredder::new(slot, parent, 0.0, keypair.clone(), None, 0, 0)
             .expect("Failed to create entry shredder");
         Shred::from_packets(shredder.entries_to_shreds(&cache, &entries, true, 0).0)
     }

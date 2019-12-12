@@ -1,6 +1,5 @@
 #![allow(clippy::implicit_hasher)]
 use crate::shred::ShredType;
-use solana_sdk::signature::{Keypair, KeypairUtil};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -17,13 +16,13 @@ use solana_perf::{
     sigverify::{self, TxOffset},
 };
 use solana_rayon_threadlimit::get_thread_count;
-use solana_sdk::signature::Signature;
 use solana_sdk::pubkey::Pubkey;
-use std::{cell::RefCell, collections::HashMap, mem::size_of};
+use solana_sdk::signature::Signature;
+use solana_sdk::signature::{Keypair, KeypairUtil};
 use std::sync::Arc;
+use std::{cell::RefCell, collections::HashMap, mem::size_of};
 
-
-pub const SIGN_SHRED_GPU_MIN: usize = 1;
+pub const SIGN_SHRED_GPU_MIN: usize = 256;
 
 thread_local!(static PAR_THREAD_POOL: RefCell<ThreadPool> = RefCell::new(rayon::ThreadPoolBuilder::new()
                     .num_threads(get_thread_count())
@@ -292,10 +291,7 @@ pub fn verify_shreds_gpu(
 ///   ...
 /// }
 /// Signature is the first thing in the packet, and slot is the first thing in the signed message.
-fn sign_shred_cpu(
-    keypair: &Keypair,
-    packet: &mut Packet,
-) {
+fn sign_shred_cpu(keypair: &Keypair, packet: &mut Packet) {
     let sig_start = 0;
     let sig_end = sig_start + size_of::<Signature>();
     let msg_start = sig_end;
@@ -309,29 +305,23 @@ fn sign_shred_cpu(
     packet.data[0..sig_end].copy_from_slice(&signature.to_bytes());
 }
 
-pub fn sign_shreds_cpu(
-    keypair: &Keypair,
-    batches: &mut [Packets],
-) {
+pub fn sign_shreds_cpu(keypair: &Keypair, batches: &mut [Packets]) {
     use rayon::prelude::*;
     let count = batch_size(batches);
     debug!("CPU SHRED ECDSA for {}", count);
     PAR_THREAD_POOL.with(|thread_pool| {
         thread_pool.borrow().install(|| {
             batches.par_iter_mut().for_each(|p| {
-                p.packets[..].par_iter_mut().for_each(|mut p| {
-                    sign_shred_cpu(keypair, &mut p)
-                });
+                p.packets[..]
+                    .par_iter_mut()
+                    .for_each(|mut p| sign_shred_cpu(keypair, &mut p));
             });
         })
     });
     inc_new_counter_debug!("ed25519_shred_verify_cpu", count);
 }
 
-pub fn sign_shreds_gpu_pinned_keypair(
-    keypair: &Keypair,
-    cache: &RecyclerCache,
-) -> PinnedVec<u8> {
+pub fn sign_shreds_gpu_pinned_keypair(keypair: &Keypair, cache: &RecyclerCache) -> PinnedVec<u8> {
     let mut vec = cache.buffer().allocate("pinned_keypair");
     let pubkey = keypair.pubkey().to_bytes();
     let secret = keypair.secret.to_bytes();
@@ -358,7 +348,7 @@ pub fn sign_shreds_gpu(
     let pubkey_size = size_of::<Pubkey>();
     let api = perf_libs::api();
     let count = batch_size(batches);
-    if api.is_none() || count < SIGN_SHRED_GPU_MIN  || pinned_keypair.is_none() {
+    if api.is_none() || count < SIGN_SHRED_GPU_MIN || pinned_keypair.is_none() {
         return sign_shreds_cpu(keypair, batches);
     }
     let api = api.unwrap();
@@ -615,12 +605,10 @@ pub mod tests {
         let keypair = Keypair::new();
         let pinned_keypair = sign_shreds_gpu_pinned_keypair(&keypair, &recycler_cache);
         let pinned_keypair = Some(Arc::new(pinned_keypair));
-        let pubkeys = [
-            (slot, keypair.pubkey().to_bytes()),
-        ]
-        .iter()
-        .cloned()
-        .collect();
+        let pubkeys = [(slot, keypair.pubkey().to_bytes())]
+            .iter()
+            .cloned()
+            .collect();
         //unsigned
         let rv = verify_shreds_gpu(&batch, &pubkeys, &recycler_cache);
         assert_eq!(rv, vec![vec![0; num_packets]; num_batches]);

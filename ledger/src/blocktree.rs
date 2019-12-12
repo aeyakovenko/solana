@@ -1020,9 +1020,16 @@ impl Blocktree {
         let mut remaining_ticks_in_slot = num_slots * ticks_per_slot - num_ticks_in_start_slot;
 
         let mut current_slot = start_slot;
-        let mut shredder =
-            Shredder::new(current_slot, parent_slot, 0.0, keypair.clone(), None, 0, version)
-                .expect("Failed to create entry shredder");
+        let mut shredder = Shredder::new(
+            current_slot,
+            parent_slot,
+            0.0,
+            keypair.clone(),
+            None,
+            0,
+            version,
+        )
+        .expect("Failed to create entry shredder");
         let mut all_shreds = vec![];
         let mut slot_entries = vec![];
         // Find all the entries for start_slot
@@ -2079,8 +2086,16 @@ pub fn entries_to_test_shreds(
     version: u16,
 ) -> Vec<Shred> {
     let cache = RecyclerCache::default();
-    let shredder = Shredder::new(slot, parent_slot, 0.0, Arc::new(Keypair::new()), None, 0, version)
-        .expect("Failed to create entry shredder");
+    let shredder = Shredder::new(
+        slot,
+        parent_slot,
+        0.0,
+        Arc::new(Keypair::new()),
+        None,
+        0,
+        version,
+    )
+    .expect("Failed to create entry shredder");
 
     let packets = shredder
         .entries_to_shreds(&cache, &entries, is_full_slot, 0)
