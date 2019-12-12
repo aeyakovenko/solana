@@ -38,20 +38,24 @@ pub(super) struct StandardBroadcastRun {
     current_slot_and_parent: Option<(u64, u64)>,
     slot_broadcast_start: Option<Instant>,
     keypair: Arc<Keypair>,
+    pinned_keypair: Arc<PinnedVec<u8>>,
     shred_version: u16,
     recycler_cache: RecyclerCache,
 }
 
 impl StandardBroadcastRun {
     pub(super) fn new(keypair: Arc<Keypair>, shred_version: u16) -> Self {
+        let recycler_cache = RecyclerCache::warmed();
+        let pinned_keypair = Arc::new(sign_shred_gpu_pinned_keypair(keypair, &recycler_ache));
         Self {
             stats: BroadcastStats::default(),
             unfinished_slot: None,
             current_slot_and_parent: None,
             slot_broadcast_start: None,
             keypair,
+            pinned_keypair,
             shred_version,
-            recycler_cache: RecyclerCache::warmed(),
+            recycler_cache:
         }
     }
 

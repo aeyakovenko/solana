@@ -1,6 +1,6 @@
 #![allow(clippy::implicit_hasher)]
 use crate::shred::ShredType;
-use ed25519_dalek::{Keypair, PublicKey, SecretKey};
+use solana_sdk::signature::{Keypair, KeypairUtil};
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -18,9 +18,12 @@ use solana_perf::{
 };
 use solana_rayon_threadlimit::get_thread_count;
 use solana_sdk::signature::Signature;
+use solana_sdk::pubkey::Pubkey;
 use std::{cell::RefCell, collections::HashMap, mem::size_of};
+use std::sync::Arc;
 
-pub const SIGN_SHRED_GPU_MIN: usize = 32;
+
+pub const SIGN_SHRED_GPU_MIN: usize = 1;
 
 thread_local!(static PAR_THREAD_POOL: RefCell<ThreadPool> = RefCell::new(rayon::ThreadPoolBuilder::new()
                     .num_threads(get_thread_count())
@@ -150,15 +153,24 @@ fn slot_key_data_for_gpu<
                 .push((offset_start + (slot_to_key_ix.get(slot).unwrap() * size_of::<T>())) as u32);
         });
     });
+    let num_in_packets = resize_vec(&mut keyvec);
+    trace!("keyvec.len: {}", keyvec.len());
+    trace!("keyvec: {:?}", keyvec);
+    trace!("offsets: {:?}", offsets);
+    (keyvec, offsets, num_in_packets)
+}
+
+fn vec_size_in_packets(keyvec: &PinnedVec<u8>) -> usize {
+    (keyvec.len() + (size_of::<Packet>() - 1)) / size_of::<Packet>()
+}
+
+fn resize_vec(keyvec: &mut PinnedVec<u8>) -> usize {
     //HACK: Pubkeys vector is passed along as a `Packets` buffer to the GPU
     //TODO: GPU needs a more opaque interface, which can handle variable sized structures for data
     //Pad the Pubkeys buffer such that it is bigger than a buffer of Packet sized elems
     let num_in_packets = (keyvec.len() + (size_of::<Packet>() - 1)) / size_of::<Packet>();
     keyvec.resize(num_in_packets * size_of::<Packet>(), 0u8);
-    trace!("keyvec.len: {}", keyvec.len());
-    trace!("keyvec: {:?}", keyvec);
-    trace!("offsets: {:?}", offsets);
-    (keyvec, offsets, num_in_packets)
+    num_in_packets
 }
 
 fn shred_gpu_offsets(
@@ -281,36 +293,15 @@ pub fn verify_shreds_gpu(
 /// }
 /// Signature is the first thing in the packet, and slot is the first thing in the signed message.
 fn sign_shred_cpu(
+    keypair: &Keypair,
     packet: &mut Packet,
-    slot_leaders_pubkeys: &HashMap<u64, [u8; 32]>,
-    slot_leaders_privkeys: &HashMap<u64, [u8; 32]>,
 ) {
     let sig_start = 0;
     let sig_end = sig_start + size_of::<Signature>();
-    let slot_start = sig_end + size_of::<ShredType>();
-    let slot_end = slot_start + size_of::<u64>();
     let msg_start = sig_end;
     let msg_end = packet.meta.size;
-    trace!("slot start and end {} {}", slot_start, slot_end);
     assert!(
-        packet.meta.size >= slot_end,
-        "packet is not large enough for a slot"
-    );
-    let slot: u64 =
-        limited_deserialize(&packet.data[slot_start..slot_end]).expect("can't deserialize slot");
-    trace!("slot {}", slot);
-    let pubkey = slot_leaders_pubkeys
-        .get(&slot)
-        .expect("slot pubkey missing");
-    let privkey = slot_leaders_privkeys
-        .get(&slot)
-        .expect("slot privkey missing");
-    let keypair = Keypair {
-        secret: SecretKey::from_bytes(&privkey[0..32]).expect("dalek privkey parser"),
-        public: PublicKey::from_bytes(&pubkey[0..32]).expect("dalek pubkey parser"),
-    };
-    assert!(
-        packet.meta.size >= sig_end,
+        packet.meta.size >= msg_end,
         "packet is not large enough for a signature"
     );
     let signature = keypair.sign(&packet.data[msg_start..msg_end]);
@@ -319,9 +310,8 @@ fn sign_shred_cpu(
 }
 
 pub fn sign_shreds_cpu(
+    keypair: &Keypair,
     batches: &mut [Packets],
-    slot_leaders_pubkeys: &HashMap<u64, [u8; 32]>,
-    slot_leaders_privkeys: &HashMap<u64, [u8; 32]>,
 ) {
     use rayon::prelude::*;
     let count = batch_size(batches);
@@ -330,7 +320,7 @@ pub fn sign_shreds_cpu(
         thread_pool.borrow().install(|| {
             batches.par_iter_mut().for_each(|p| {
                 p.packets[..].par_iter_mut().for_each(|mut p| {
-                    sign_shred_cpu(&mut p, slot_leaders_pubkeys, slot_leaders_privkeys)
+                    sign_shred_cpu(keypair, &mut p)
                 });
             });
         })
@@ -338,51 +328,54 @@ pub fn sign_shreds_cpu(
     inc_new_counter_debug!("ed25519_shred_verify_cpu", count);
 }
 
+pub fn sign_shreds_gpu_pinned_keypair(
+    keypair: &Keypair,
+    cache: &RecyclerCache,
+) -> PinnedVec<u8> {
+    let mut vec = cache.buffer().allocate("pinned_keypair");
+    let pubkey = keypair.pubkey().to_bytes();
+    let secret = keypair.secret.to_bytes();
+    let mut hasher = Sha512::default();
+    hasher.input(&secret);
+    let mut result = hasher.result();
+    result[0] &= 248;
+    result[31] &= 63;
+    result[31] |= 64;
+    vec.resize(pubkey.len() + result.len(), 0);
+    vec[0..pubkey.len()].copy_from_slice(&pubkey);
+    vec[pubkey.len()..].copy_from_slice(&result);
+    resize_vec(&mut vec);
+    vec
+}
+
 pub fn sign_shreds_gpu(
+    keypair: &Keypair,
+    pinned_keypair: &Option<Arc<PinnedVec<u8>>>,
     batches: &mut [Packets],
-    slot_leaders_pubkeys: &HashMap<u64, [u8; 32]>,
-    slot_leaders_privkeys: &HashMap<u64, [u8; 32]>,
     recycler_cache: &RecyclerCache,
 ) {
     let sig_size = size_of::<Signature>();
+    let pubkey_size = size_of::<Pubkey>();
     let api = perf_libs::api();
     let count = batch_size(batches);
-    if api.is_none() || count < SIGN_SHRED_GPU_MIN {
-        return sign_shreds_cpu(batches, slot_leaders_pubkeys, slot_leaders_privkeys);
+    if api.is_none() || count < SIGN_SHRED_GPU_MIN  || pinned_keypair.is_none() {
+        return sign_shreds_cpu(keypair, batches);
     }
-    let slot_leaders_secrets: HashMap<u64, Signature> = slot_leaders_privkeys
-        .iter()
-        .map(|(k, v)| {
-            if *k == std::u64::MAX {
-                (*k, Signature::default())
-            } else {
-                let mut hasher = Sha512::default();
-                hasher.input(&v);
-                let mut result = hasher.result();
-                result[0] &= 248;
-                result[31] &= 63;
-                result[31] |= 64;
-                let sig = Signature::new(result.as_slice());
-                (*k, sig)
-            }
-        })
-        .collect();
     let api = api.unwrap();
+    let pinned_keypair = pinned_keypair.as_ref().unwrap();
 
     let mut elems = Vec::new();
-    let mut offset: usize = 0;
-    let mut num_packets = 0;
-    let (pubkeys, pubkey_offsets, num_pubkey_packets) =
-        slot_key_data_for_gpu(offset, batches, slot_leaders_pubkeys, recycler_cache);
-    offset += num_pubkey_packets * size_of::<Packet>();
-    num_packets += num_pubkey_packets;
-    trace!("offset: {}", offset);
-    let (secrets, secret_offsets, num_secret_packets) =
-        slot_key_data_for_gpu(offset, batches, &slot_leaders_secrets, recycler_cache);
-    offset += num_secret_packets * size_of::<Packet>();
-    num_packets += num_secret_packets;
-    //HACK: Pubkeys vector is passed along as a `Packets` buffer to the GPU
-    //TODO: GPU needs a more opaque interface, which can handle variable sized structures for data
+    let offset: usize = pinned_keypair.len();
+    let num_keypair_packets = vec_size_in_packets(&pinned_keypair);
+    let mut num_packets = num_keypair_packets;
+
+    //should be zero
+    let mut pubkey_offsets = recycler_cache.offsets().allocate("pubkey offsets");
+    pubkey_offsets.resize(count, 0);
+
+    let mut secret_offsets = recycler_cache.offsets().allocate("secret_offsets");
+    secret_offsets.resize(count, pubkey_size as u32);
+
     trace!("offset: {}", offset);
     let (signature_offsets, msg_start_offsets, msg_sizes, _v_sig_lens) =
         shred_gpu_offsets(offset, batches, recycler_cache);
@@ -393,16 +386,8 @@ pub fn sign_shreds_gpu(
     elems.push(
         perf_libs::Elems {
             #![allow(clippy::cast_ptr_alignment)]
-            elems: pubkeys.as_ptr() as *const solana_sdk::packet::Packet,
-            num: num_pubkey_packets as u32,
-        },
-    );
-
-    elems.push(
-        perf_libs::Elems {
-            #![allow(clippy::cast_ptr_alignment)]
-            elems: secrets.as_ptr() as *const solana_sdk::packet::Packet,
-            num: num_secret_packets as u32,
+            elems: pinned_keypair.as_ptr() as *const solana_sdk::packet::Packet,
+            num: num_keypair_packets as u32,
         },
     );
 
@@ -628,16 +613,10 @@ pub mod tests {
         }
         let mut batch = vec![packets; num_batches];
         let keypair = Keypair::new();
+        let pinned_keypair = sign_shreds_gpu_pinned_keypair(&keypair, &recycler_cache);
+        let pinned_keypair = Some(Arc::new(pinned_keypair));
         let pubkeys = [
             (slot, keypair.pubkey().to_bytes()),
-            (std::u64::MAX, [0u8; 32]),
-        ]
-        .iter()
-        .cloned()
-        .collect();
-        let privkeys = [
-            (slot, keypair.secret.to_bytes()),
-            (std::u64::MAX, [0u8; 32]),
         ]
         .iter()
         .cloned()
@@ -646,7 +625,7 @@ pub mod tests {
         let rv = verify_shreds_gpu(&batch, &pubkeys, &recycler_cache);
         assert_eq!(rv, vec![vec![0; num_packets]; num_batches]);
         //signed
-        sign_shreds_gpu(&mut batch, &pubkeys, &privkeys, &recycler_cache);
+        sign_shreds_gpu(&keypair, &pinned_keypair, &mut batch, &recycler_cache);
         let rv = verify_shreds_cpu(&batch, &pubkeys);
         assert_eq!(rv, vec![vec![1; num_packets]; num_batches]);
 
@@ -673,18 +652,11 @@ pub mod tests {
         .iter()
         .cloned()
         .collect();
-        let privkeys = [
-            (slot, keypair.secret.to_bytes()),
-            (std::u64::MAX, [0u8; 32]),
-        ]
-        .iter()
-        .cloned()
-        .collect();
         //unsigned
         let rv = verify_shreds_cpu(&batch, &pubkeys);
         assert_eq!(rv, vec![vec![0]]);
         //signed
-        sign_shreds_cpu(&mut batch, &pubkeys, &privkeys);
+        sign_shreds_cpu(&keypair, &mut batch);
         let rv = verify_shreds_cpu(&batch, &pubkeys);
         assert_eq!(rv, vec![vec![1]]);
     }

@@ -1021,7 +1021,7 @@ impl Blocktree {
 
         let mut current_slot = start_slot;
         let mut shredder =
-            Shredder::new(current_slot, parent_slot, 0.0, keypair.clone(), 0, version)
+            Shredder::new(current_slot, parent_slot, 0.0, keypair.clone(), None, 0, version)
                 .expect("Failed to create entry shredder");
         let mut all_shreds = vec![];
         let mut slot_entries = vec![];
@@ -1053,6 +1053,7 @@ impl Blocktree {
                     parent_slot,
                     0.0,
                     keypair.clone(),
+                    None,
                     (ticks_per_slot - remaining_ticks_in_slot) as u8,
                     version,
                 )
@@ -1957,7 +1958,7 @@ pub fn create_new_ledger(ledger_path: &Path, genesis_config: &GenesisConfig) -> 
     let last_hash = entries.last().unwrap().hash;
     let version = Shred::version_from_hash(&last_hash);
 
-    let shredder = Shredder::new(0, 0, 0.0, Arc::new(Keypair::new()), 0, version)
+    let shredder = Shredder::new(0, 0, 0.0, Arc::new(Keypair::new()), None, 0, version)
         .expect("Failed to create entry shredder");
     let shreds = shredder
         .entries_to_shreds(&blocktree.recycler_cache, &entries, true, 0)
@@ -2078,7 +2079,7 @@ pub fn entries_to_test_shreds(
     version: u16,
 ) -> Vec<Shred> {
     let cache = RecyclerCache::default();
-    let shredder = Shredder::new(slot, parent_slot, 0.0, Arc::new(Keypair::new()), 0, version)
+    let shredder = Shredder::new(slot, parent_slot, 0.0, Arc::new(Keypair::new()), None, 0, version)
         .expect("Failed to create entry shredder");
 
     let packets = shredder
@@ -4693,6 +4694,7 @@ pub mod tests {
             parent_slot,
             erasure_rate,
             leader_keypair.clone(),
+            None,
             0,
             0,
         )

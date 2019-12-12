@@ -12,6 +12,7 @@ use rayon::{
     slice::ParallelSlice,
     ThreadPool,
 };
+use solana_perf::cuda_runtime::PinnedVec;
 use serde::{Deserialize, Serialize};
 use solana_metrics::datapoint_debug;
 use solana_perf::packet::batch_size;
@@ -25,7 +26,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, KeypairUtil, Signature},
 };
-use std::collections::HashMap;
 use std::{sync::Arc, time::Instant};
 use thiserror::Error;
 
@@ -525,6 +525,7 @@ pub struct Shredder {
     version: u16,
     fec_rate: f32,
     keypair: Arc<Keypair>,
+    pinned_keypair: Option<Arc<PinnedVec<u8>>>,
     pub signing_coding_time: u128,
     reference_tick: u8,
 }
@@ -535,6 +536,7 @@ impl Shredder {
         parent_slot: Slot,
         fec_rate: f32,
         keypair: Arc<Keypair>,
+        pinned_keypair: Option<Arc<PinnedVec<u8>>>,
         reference_tick: u8,
         version: u16,
     ) -> Result<Self> {
@@ -547,6 +549,7 @@ impl Shredder {
                 slot,
                 parent_slot,
                 fec_rate,
+                pinned_keypair,
                 keypair,
                 signing_coding_time: 0,
                 reference_tick,
@@ -657,15 +660,8 @@ impl Shredder {
         );
 
         let now = Instant::now();
-        let mut pubkeys: HashMap<u64, [u8; 32]> = HashMap::new();
-        let mut privkeys: HashMap<u64, [u8; 32]> = HashMap::new();
-        //default value is necessary in case GPU is unable to parse the packet
-        pubkeys.insert(std::u64::MAX, [0u8; 32]);
-        privkeys.insert(std::u64::MAX, [0u8; 32]);
         //key values
-        pubkeys.insert(self.slot, self.keypair.pubkey().to_bytes());
-        privkeys.insert(self.slot, self.keypair.secret.to_bytes());
-        sigverify_shreds::sign_shreds_gpu(&mut data_shreds, &pubkeys, &privkeys, recycler_cache);
+        sigverify_shreds::sign_shreds_gpu(&self.keypair, &self.pinned_keypair,&mut data_shreds, recycler_cache);
         let sign_data_time = now.elapsed().as_micros();
 
         let now = Instant::now();
@@ -689,7 +685,7 @@ impl Shredder {
         let gen_coding_time = now.elapsed().as_micros();
 
         let now = Instant::now();
-        sigverify_shreds::sign_shreds_gpu(&mut coding_shreds, &pubkeys, &privkeys, recycler_cache);
+        sigverify_shreds::sign_shreds_gpu(&self.keypair, &self.pinned_keypair, &mut coding_shreds, recycler_cache);
         let sign_coding_time = now.elapsed().as_micros();
 
         datapoint_debug!(
@@ -1089,7 +1085,7 @@ pub mod tests {
 
         // Test that parent cannot be > current slot
         assert_matches!(
-            Shredder::new(slot, slot + 1, 1.00, keypair.clone(), 0, 0),
+            Shredder::new(slot, slot + 1, 1.00, keypair.clone(), None, 0, 0),
             Err(ShredError::SlotTooLow {
                 slot: _,
                 parent_slot: _,
@@ -1097,7 +1093,7 @@ pub mod tests {
         );
         // Test that slot - parent cannot be > u16 MAX
         assert_matches!(
-            Shredder::new(slot, slot - 1 - 0xffff, 1.00, keypair.clone(), 0, 0),
+            Shredder::new(slot, slot - 1 - 0xffff, 1.00, keypair.clone(), None, 0, 0),
             Err(ShredError::SlotTooLow {
                 slot: _,
                 parent_slot: _,
@@ -1106,7 +1102,7 @@ pub mod tests {
 
         let fec_rate = 0.25;
         let parent_slot = slot - 5;
-        let shredder = Shredder::new(slot, parent_slot, fec_rate, keypair.clone(), 0, 0)
+        let shredder = Shredder::new(slot, parent_slot, fec_rate, keypair.clone(), None, 0, 0)
             .expect("Failed in creating shredder");
 
         let entries: Vec<_> = (0..5)
@@ -1184,7 +1180,7 @@ pub mod tests {
         let slot = 1;
 
         let parent_slot = 0;
-        let shredder = Shredder::new(slot, parent_slot, 0.0, keypair.clone(), 0, 0)
+        let shredder = Shredder::new(slot, parent_slot, 0.0, keypair.clone(), None, 0, 0)
             .expect("Failed in creating shredder");
 
         let entries: Vec<_> = (0..5)
@@ -1213,7 +1209,7 @@ pub mod tests {
         let slot = 1;
 
         let parent_slot = 0;
-        let shredder = Shredder::new(slot, parent_slot, 0.0, keypair.clone(), 5, 0)
+        let shredder = Shredder::new(slot, parent_slot, 0.0, keypair.clone(), None, 5, 0)
             .expect("Failed in creating shredder");
 
         let entries: Vec<_> = (0..5)
@@ -1247,7 +1243,7 @@ pub mod tests {
         let slot = 1;
 
         let parent_slot = 0;
-        let shredder = Shredder::new(slot, parent_slot, 0.0, keypair.clone(), u8::max_value(), 0)
+        let shredder = Shredder::new(slot, parent_slot, 0.0, keypair.clone(), None, u8::max_value(), 0)
             .expect("Failed in creating shredder");
 
         let entries: Vec<_> = (0..5)
@@ -1288,11 +1284,11 @@ pub mod tests {
         let slot = 0x123456789abcdef0;
         // Test that FEC rate cannot be > 1.0
         assert_matches!(
-            Shredder::new(slot, slot - 5, 1.001, keypair.clone(), 0, 0),
+            Shredder::new(slot, slot - 5, 1.001, keypair.clone(), None, 0, 0),
             Err(ShredError::InvalidFecRate(_))
         );
 
-        let shredder = Shredder::new(0x123456789abcdef0, slot - 5, 1.0, keypair.clone(), 0, 0)
+        let shredder = Shredder::new(0x123456789abcdef0, slot - 5, 1.0, keypair.clone(), None, 0, 0)
             .expect("Failed in creating shredder");
 
         // Create enough entries to make > 1 shred
@@ -1338,7 +1334,7 @@ pub mod tests {
         let recycler_cache = RecyclerCache::default();
         let keypair = Arc::new(Keypair::new());
         let slot = 0x123456789abcdef0;
-        let shredder = Shredder::new(slot, slot - 5, 1.0, keypair.clone(), 0, 0)
+        let shredder = Shredder::new(slot, slot - 5, 1.0, keypair.clone(), None, 0, 0)
             .expect("Failed in creating shredder");
 
         let keypair0 = Keypair::new();
@@ -1594,7 +1590,7 @@ pub mod tests {
         let recycler_cache = RecyclerCache::default();
         assert_ne!(version, 0);
         let shredder =
-            Shredder::new(0, 0, 1.0, keypair, 0, version).expect("Failed in creating shredder");
+            Shredder::new(0, 0, 1.0, keypair, None, 0, version).expect("Failed in creating shredder");
 
         let entries: Vec<_> = (0..5)
             .map(|_| {
