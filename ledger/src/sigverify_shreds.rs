@@ -1,8 +1,9 @@
 #![allow(clippy::implicit_hasher)]
 use crate::shred::ShredType;
+use crate::shred::Shred;
 use rayon::{
     iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+        IndexedParallelIterator, IntoParallelRefMutIterator, IntoParallelIterator, ParallelIterator,
     },
     ThreadPool,
 };
@@ -291,32 +292,31 @@ pub fn verify_shreds_gpu(
 ///   ...
 /// }
 /// Signature is the first thing in the packet, and slot is the first thing in the signed message.
-fn sign_shred_cpu(keypair: &Keypair, packet: &mut Packet) {
+fn sign_shred_cpu(keypair: &Keypair, shred: &mut Shred) {
     let sig_start = 0;
     let sig_end = sig_start + size_of::<Signature>();
     let msg_start = sig_end;
-    let msg_end = packet.meta.size;
     assert!(
-        packet.meta.size >= msg_end,
+        shred.payload.len() >= msg_start,
         "packet is not large enough for a signature"
     );
-    let signature = keypair.sign(&packet.data[msg_start..msg_end]);
-    trace!("signature {:?}", signature);
-    packet.data[0..sig_end].copy_from_slice(&signature.to_bytes());
+    let sig = keypair.sign_message(&shred.payload[msg_start..]);
+    shred.set_signature(sig);
 }
 
-pub fn sign_shreds_cpu(keypair: &Keypair, batches: &mut [Packets]) {
-    use rayon::prelude::*;
-    let count = batch_size(batches);
+fn shred_batch_size(batches: &[Vec<Shred>]) -> usize {
+    batches.iter().map(|b| b.len()).sum()
+}
+
+pub fn sign_shreds_cpu(keypair: &Keypair, batches: &mut [Vec<Shred>]) {
+    let count = shred_batch_size(batches);
     debug!("CPU SHRED ECDSA for {}", count);
     PAR_THREAD_POOL.with(|thread_pool| {
         thread_pool.borrow().install(|| {
-            batches.par_iter_mut().for_each(|p| {
-                p.packets[..]
-                    .par_iter_mut()
-                    .for_each(|mut p| sign_shred_cpu(keypair, &mut p));
+            batches.par_iter_mut().for_each(|shreds| {
+                shreds.par_iter_mut().for_each(|p| sign_shred_cpu(keypair, p));
             });
-        })
+        });
     });
     inc_new_counter_debug!("ed25519_shred_verify_cpu", count);
 }
@@ -341,16 +341,26 @@ pub fn sign_shreds_gpu_pinned_keypair(keypair: &Keypair, cache: &RecyclerCache) 
 pub fn sign_shreds_gpu(
     keypair: &Keypair,
     pinned_keypair: &Option<Arc<PinnedVec<u8>>>,
-    batches: &mut [Packets],
+    batches: &mut [Vec<Shred>],
     recycler_cache: &RecyclerCache,
 ) {
     let sig_size = size_of::<Signature>();
     let pubkey_size = size_of::<Pubkey>();
     let api = perf_libs::api();
-    let count = batch_size(batches);
+    let count = shred_batch_size(batches);
     if api.is_none() || count < SIGN_SHRED_GPU_MIN || pinned_keypair.is_none() {
         return sign_shreds_cpu(keypair, batches);
     }
+    let mut packets = Packets::new_with_recycler(recycler_cache.packets().clone(), count, "sign_shreds_gpu");
+    packets.packets.resize(count, Packet::default());
+    let mut i = 0;
+    for batch in batches.iter() {
+        for shred in batch.iter() {
+            shred.copy_to_packet(&mut packets.packets[i]);
+            i += 1;
+        }
+    }
+    let packets = vec![packets];
     let api = api.unwrap();
     let pinned_keypair = pinned_keypair.as_ref().unwrap();
 
@@ -368,7 +378,7 @@ pub fn sign_shreds_gpu(
 
     trace!("offset: {}", offset);
     let (signature_offsets, msg_start_offsets, msg_sizes, _v_sig_lens) =
-        shred_gpu_offsets(offset, batches, recycler_cache);
+        shred_gpu_offsets(offset, &packets, recycler_cache);
     let total_sigs = signature_offsets.len();
     let mut signatures_out = recycler_cache.buffer().allocate("ed25519 signatures");
     signatures_out.set_pinnable();
@@ -381,7 +391,7 @@ pub fn sign_shreds_gpu(
         },
     );
 
-    for p in batches.iter() {
+    for p in packets.iter() {
         elems.push(perf_libs::Elems {
             elems: p.packets.as_ptr(),
             num: p.packets.len() as u32,
@@ -415,7 +425,7 @@ pub fn sign_shreds_gpu(
     }
     trace!("done sign");
     let mut sizes: Vec<usize> = vec![0];
-    sizes.extend(batches.iter().map(|b| b.packets.len()));
+    sizes.extend(batches.iter().map(|b| b.len()));
     for i in 0..sizes.len() {
         if i == 0 {
             continue;
@@ -429,15 +439,14 @@ pub fn sign_shreds_gpu(
                 .enumerate()
                 .for_each(|(batch_ix, batch)| {
                     let num_packets = sizes[batch_ix];
-                    batch.packets[..]
-                        .par_iter_mut()
+                    batch.par_iter_mut()
                         .enumerate()
-                        .for_each(|(packet_ix, packet)| {
+                        .for_each(|(packet_ix, shred)| {
                             let sig_ix = packet_ix + num_packets;
                             let sig_start = sig_ix * sig_size;
                             let sig_end = sig_start + sig_size;
-                            packet.data[0..sig_size]
-                                .copy_from_slice(&signatures_out[sig_start..sig_end]);
+                            let signature = Signature::new(&signatures_out[sig_start..sig_end]);
+                            shred.set_signature(signature);
                         });
                 });
         });

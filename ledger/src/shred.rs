@@ -144,7 +144,11 @@ impl Shred {
         packet.data[..len].copy_from_slice(&self.payload[..]);
         packet.meta.size = len;
     }
-
+    pub fn set_signature(&mut self, signature: Signature) {
+        bincode::serialize_into(&mut self.payload[..SIZE_OF_SIGNATURE], &signature)
+            .expect("Failed to generate serialized signature");
+        self.common_header.signature = signature;
+    }
     pub fn new_from_data(
         slot: Slot,
         index: u32,
@@ -559,9 +563,7 @@ impl Shredder {
 
     pub fn sign_shred(signer: &Keypair, shred: &mut Shred) {
         let signature = signer.sign_message(&shred.payload[SIZE_OF_SIGNATURE..]);
-        bincode::serialize_into(&mut shred.payload[..SIZE_OF_SIGNATURE], &signature)
-            .expect("Failed to generate serialized signature");
-        shred.common_header.signature = signature;
+        shred.set_signature(signature);
     }
 
     pub fn new_coding_shred_header(
