@@ -138,7 +138,9 @@ impl Shred {
         *index += size;
         Ok(())
     }
-
+    pub fn from_packet(packet: &Packet) -> Self {
+        Self::new_from_serialized_shred(packet.data.to_vec()).expect("valid shred")
+    }
     pub fn copy_to_packet(&self, packet: &mut Packet) {
         let len = self.payload.len();
         packet.data[..len].copy_from_slice(&self.payload[..]);
