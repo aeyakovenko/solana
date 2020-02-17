@@ -356,6 +356,33 @@ impl ClusterInfo {
         old_incomplete_slots
     }
 
+    pub fn push_snapshot_hash(&mut self, slot: Slot, hash: Hash) {
+        let mut snapshot_hash = self.gossip
+            .crds
+            .table
+            .get(&CrdsValueLabel::SnapshotHash(self.keypair.pubkey()))
+            .flat_map(|x| x.value.snapshot_hash())
+            .unwrap_or_default()
+        let now = timestamp();
+        snapshot_hash.wallclock = now;
+        snapshot_hash.hashes.push((slot,hash));
+        if snapshot_hash.hashes.len() > 64 {
+            let sz = snapshot_hash.hashes.len() - 64;
+            let mut old = vec![];
+            std::mem::swap(&mut snapshot_hash.hashes, &mut old);
+            snapshot_hash.hashes = old.into_iter().skip(sz).collect();
+        }
+        let entry = CrdsValue::new_signed(
+            CrdsData::SnapshotHash(snapshot_hash)
+            ),
+            &self.keypair,
+        );
+        self.gossip
+            .process_push_message(&self.id(), vec![entry], now);
+    }
+    pub fn check_snapshot_hash(&self, slot: Slot, trusted: HashSet<Pubkey>) {
+    }
+
     pub fn push_epoch_slots(
         &mut self,
         id: Pubkey,

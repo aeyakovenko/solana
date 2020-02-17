@@ -59,6 +59,15 @@ pub enum CrdsData {
     Vote(VoteIndex, Vote),
     /// * Merge Strategy - Latest wallclock is picked
     EpochSlots(EpochSlots),
+    /// * Merge Strategy - Latest wallclock is picked
+    SnapshotHash(SnapshotHashes),
+}
+
+/// Every X slots validators generate a snapshot hash which they broadcast
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct SnapshotHashes {
+    pub hashes: Vec<(Slot,Hash)>,
+    pub wallclock: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
