@@ -63,12 +63,25 @@ pub enum CrdsData {
     SnapshotHash(SnapshotHashes),
 }
 
+pub const SNAPSHOT_HASHES_MAX: usize = 24;
+
 /// Every X slots validators generate a snapshot hash which they broadcast
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct SnapshotHashes {
-    pub hashes: Vec<(Slot,Hash)>,
+    pub hashes: HashMap<Slot, Hash>,
     pub wallclock: u64,
 }
+impl SnapshotHashes {
+    pub fn push(&mut self, now: u64, slot: Slot, hash: Hash) {
+        self.wallclock = now;
+        self.hashes.insert(slot,hash);
+        if self.hashes.len() > SNAPSHOT_HASHES_MAX {
+            let min = self.hashes.keys().iter().min();
+            self.hashes.remove(min);
+        }
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct EpochSlots {
@@ -81,7 +94,7 @@ pub struct EpochSlots {
     pub wallclock: u64,
 }
 
-impl EpochSlots {
+ipl EpochSlots {
     pub fn new(
         from: Pubkey,
         root: Slot,

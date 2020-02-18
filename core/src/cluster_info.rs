@@ -364,14 +364,7 @@ impl ClusterInfo {
             .flat_map(|x| x.value.snapshot_hash())
             .unwrap_or_default()
         let now = timestamp();
-        snapshot_hash.wallclock = now;
-        snapshot_hash.hashes.push((slot,hash));
-        if snapshot_hash.hashes.len() > 64 {
-            let sz = snapshot_hash.hashes.len() - 64;
-            let mut old = vec![];
-            std::mem::swap(&mut snapshot_hash.hashes, &mut old);
-            snapshot_hash.hashes = old.into_iter().skip(sz).collect();
-        }
+        snapshot_hash.push(now, slot, hash);
         let entry = CrdsValue::new_signed(
             CrdsData::SnapshotHash(snapshot_hash)
             ),
@@ -380,7 +373,20 @@ impl ClusterInfo {
         self.gossip
             .process_push_message(&self.id(), vec![entry], now);
     }
-    pub fn check_snapshot_hash(&self, slot: Slot, trusted: HashSet<Pubkey>) {
+
+    pub fn collect_snapshot_hashes(&self, slot: Slot, trusted: &HashSet<Pubkey>) -> HashMap<Pubkey, Hash> {
+        let hashes = mut HashMap<Pubkey, Hash>;
+        for pubkey in trusted {
+            let hash = self.gossip
+                .crds
+                .table
+                .get(&CrdsValueLabel::SnapshotHash(pubkey))
+                .flat_map(|x| x.value.snapshot_hash())
+                .flat_map(|x| x.hashes.lookup(slot))
+                .unwrap_or_default()
+            hashes.insert(pubkey, hash);
+        }
+        hashes
     }
 
     pub fn push_epoch_slots(
