@@ -357,33 +357,35 @@ impl ClusterInfo {
     }
 
     pub fn push_snapshot_hash(&mut self, slot: Slot, hash: Hash) {
-        let mut snapshot_hash = self.gossip
+        let mut snapshot_hash = self
+            .gossip
             .crds
             .table
             .get(&CrdsValueLabel::SnapshotHash(self.keypair.pubkey()))
             .flat_map(|x| x.value.snapshot_hash())
-            .unwrap_or_default()
+            .unwrap_or_default();
         let now = timestamp();
         snapshot_hash.push(now, slot, hash);
-        let entry = CrdsValue::new_signed(
-            CrdsData::SnapshotHash(snapshot_hash)
-            ),
-            &self.keypair,
-        );
+        let entry = CrdsValue::new_signed(CrdsData::SnapshotHash(snapshot_hash), &self.keypair);
         self.gossip
             .process_push_message(&self.id(), vec![entry], now);
     }
 
-    pub fn collect_snapshot_hashes(&self, slot: Slot, trusted: &HashSet<Pubkey>) -> HashMap<Pubkey, Hash> {
-        let hashes = mut HashMap<Pubkey, Hash>;
+    pub fn collect_snapshot_hashes(
+        &self,
+        slot: Slot,
+        trusted: &HashSet<Pubkey>,
+    ) -> HashMap<Pubkey, Hash> {
+        let mut hashes = HashMap::new();
         for pubkey in trusted {
-            let hash = self.gossip
+            let hash = self
+                .gossip
                 .crds
                 .table
                 .get(&CrdsValueLabel::SnapshotHash(pubkey))
                 .flat_map(|x| x.value.snapshot_hash())
                 .flat_map(|x| x.hashes.lookup(slot))
-                .unwrap_or_default()
+                .unwrap_or_default();
             hashes.insert(pubkey, hash);
         }
         hashes

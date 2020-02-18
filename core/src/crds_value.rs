@@ -74,14 +74,13 @@ pub struct SnapshotHashes {
 impl SnapshotHashes {
     pub fn push(&mut self, now: u64, slot: Slot, hash: Hash) {
         self.wallclock = now;
-        self.hashes.insert(slot,hash);
+        self.hashes.insert(slot, hash);
         if self.hashes.len() > SNAPSHOT_HASHES_MAX {
             let min = self.hashes.keys().iter().min();
             self.hashes.remove(min);
         }
     }
 }
-
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct EpochSlots {
@@ -94,7 +93,7 @@ pub struct EpochSlots {
     pub wallclock: u64,
 }
 
-ipl EpochSlots {
+impl EpochSlots {
     pub fn new(
         from: Pubkey,
         root: Slot,
