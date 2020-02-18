@@ -48,7 +48,7 @@ pub mod serve_repair_service;
 pub mod sigverify;
 pub mod sigverify_shreds;
 pub mod sigverify_stage;
-pub mod snapshot_consistency_monitor;
+pub mod snapshot_monitor;
 pub mod snapshot_packager_service;
 pub mod storage_stage;
 pub mod streamer;

@@ -17,6 +17,7 @@ pub struct SnapshotPackage {
     pub snapshot_links: TempDir,
     pub storage_entries: Vec<Arc<AccountStorageEntry>>,
     pub tar_output_file: PathBuf,
+    pub hash: Option<Hash>,
 }
 
 impl SnapshotPackage {
@@ -33,6 +34,7 @@ impl SnapshotPackage {
             snapshot_links,
             storage_entries,
             tar_output_file,
+            hash: None,
         }
     }
 }

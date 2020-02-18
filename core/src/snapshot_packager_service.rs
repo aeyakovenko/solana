@@ -1,5 +1,6 @@
 use solana_ledger::{
     snapshot_package::SnapshotPackageReceiver, snapshot_utils::archive_snapshot_package,
+    snapshot_utils::hash_snapshot_archive,
 };
 use std::{
     sync::{
@@ -16,7 +17,7 @@ pub struct SnapshotPackagerService {
 }
 
 impl SnapshotPackagerService {
-    pub fn new(snapshot_package_receiver: SnapshotPackageReceiver, exit: &Arc<AtomicBool>) -> Self {
+    pub fn new(snapshot_monitor: SnapshotMonitor, snapshot_package_receiver: SnapshotPackageReceiver, exit: &Arc<AtomicBool>) -> Self {
         let exit = exit.clone();
         let t_snapshot_packager = Builder::new()
             .name("solana-snapshot-packager".to_string())
@@ -33,6 +34,13 @@ impl SnapshotPackagerService {
                         }
                         if let Err(err) = archive_snapshot_package(&snapshot_package) {
                             warn!("Failed to create snapshot archive: {}", err);
+                        }
+                        if let Err(err) = hash_snapshot_archive(&mut snapshot_package) {
+                            warn!("Failed to hash snapshot archive: {}", err);
+                        } else {
+                            snapshot_monitor.check();
+                            let hash = snapshot_package.hash.unwrap_or_default();
+                            snapshot_monitor.add(snapshot_package.root, hash);
                         }
                     }
                     Err(RecvTimeoutError::Disconnected) => break,

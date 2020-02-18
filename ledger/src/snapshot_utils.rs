@@ -2,6 +2,7 @@ use crate::snapshot_package::SnapshotPackage;
 use bincode::serialize_into;
 use bzip2::bufread::BzDecoder;
 use fs_extra::dir::CopyOptions;
+use sha2::{Sha256, Digest};
 use log::*;
 use solana_measure::measure::Measure;
 use solana_runtime::bank::{
@@ -213,6 +214,20 @@ pub fn archive_snapshot_package(snapshot_package: &SnapshotPackage) -> Result<()
         ("size", metadata.len(), i64)
     );
     Ok(())
+}
+pub fn hash_snapshot_arhive(snapshot_package: &mut SnapshotPackage) -> Result<()> {
+    if snapshot_package.hash.is_some() {
+        return Ok(());
+    }
+    let temp_dir = tempfile::TempDir::new()?;
+    let bank = bank_from_archive(snapshot_package.archive_path, &unpack_dir)?;
+
+    let mut hasher = Sha256::new();
+    let mut file = fs::File::open(&snapshot_package.archive_path);
+    let n = io::copy(&mut file, &mut hasher)?;
+    let hash = hasher.result();
+    snapshot_package.hash = Some(hash);
+    return Ok(());
 }
 
 pub fn get_snapshot_paths<P: AsRef<Path>>(snapshot_path: P) -> Vec<SlotSnapshotPaths>

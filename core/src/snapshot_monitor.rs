@@ -1,12 +1,11 @@
-enum SnapshotConsistencyError {}
-pub struct SnapshotConsistencyMonitor {
+pub struct SnapshotMonitor {
     cluster_info: Arc<RwLock<ClusterInfo>>,
     bank_forks: Arc<RwLock<BankForks>>,
     trusted: HashSet<Pubkey>,
     last_slot: Option<(Slot, Hash)>,
 }
 
-impl SnapshotConsistencyMonitor {
+impl SnapshotMonitor {
     pub fn new(
         cluster_info: Arc<RwLock<ClusterInfo>>,
         bank_forks: Arc<RwLock<BankForks>>,
@@ -19,20 +18,23 @@ impl SnapshotConsistencyMonitor {
             last_slot: None,
         }
     }
-    pub fn check(&self) -> bool {
+    pub fn check(&self) {
+        if self.last_slot.is_none() {
+            datapoint_warn!("snapshot_monitor", ("skipped", 1, i64),);
+            return;
+        }
         let trusted = self.check_trusted();
         if !trusted {
-            datapoint_warn!("snapshot_consistency_monitor", ("trusted_failed", slot, i64),);
+            datapoint_warn!("snapshot_monitor", ("trusted_failed", slot, i64),);
         } else {
-            datapoint_info!("snapshot_consistency_monitor", ("trusted_passed", slot, i64),);
+            datapoint_info!("snapshot_monitor", ("trusted_passed", slot, i64),);
         }
         let global = self.check_global();
         if !global {
-            datapoint_warn!("snapshot_consistency_monitor", ("global_failed", slot, i64),);
+            datapoint_warn!("snapshot_monitor", ("global_failed", slot, i64),);
         } else {
-            datapoint_info!("snapshot_consistency_monitor", ("global_passed", slot, i64),);
+            datapoint_info!("snapshot_monitor", ("global_passed", slot, i64),);
         }
-        self.last_slot.is_none() || (trusted && global)
     }
     fn load_values(&self, slot: Slot, set: HashSet<Pubkey>) -> HashMap<Pubkey, Hash> {
         self.cluster_info
@@ -69,8 +71,7 @@ impl SnapshotConsistencyMonitor {
         let total = vote_accounts.values().map(|v| v.0).sum();
         agreed > 2 * total / 3
     }
-
-    pub fn submit_hash(&self, slot: Slot, hash: Hash) {
+    pub fn add(&self, slot: Slot, hash: Hash) {
         self.last_slot = Some((slot, hash));
         self.cluster_info
             .write()
