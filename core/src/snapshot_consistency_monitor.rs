@@ -22,15 +22,15 @@ impl SnapshotConsistencyMonitor {
     pub fn check(&self) -> bool {
         let trusted = self.check_trusted();
         if !trusted {
-            datapoint_warn!("snapshot_consistency_check", ("trusted_failed", slot, i64),);
+            datapoint_warn!("snapshot_consistency_monitor", ("trusted_failed", slot, i64),);
         } else {
-            datapoint_info!("snapshot_consistency_check", ("trusted_passed", slot, i64),);
+            datapoint_info!("snapshot_consistency_monitor", ("trusted_passed", slot, i64),);
         }
         let global = self.check_global();
         if !global {
-            datapoint_warn!("snapshot_consistency_check", ("global_failed", slot, i64),);
+            datapoint_warn!("snapshot_consistency_monitor", ("global_failed", slot, i64),);
         } else {
-            datapoint_info!("snapshot_consistency_check", ("global_passed", slot, i64),);
+            datapoint_info!("snapshot_consistency_monitor", ("global_passed", slot, i64),);
         }
         self.last_slot.is_none() || (trusted && global)
     }
