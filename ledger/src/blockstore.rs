@@ -4,7 +4,8 @@
 pub use crate::{blockstore_db::BlockstoreError, blockstore_meta::SlotMeta};
 use crate::{
     blockstore_db::{
-        columns as cf, Database, IteratorDirection, IteratorMode, LedgerColumn, Result, WriteBatch,
+        columns as cf, Column, Database, IteratorDirection, IteratorMode, LedgerColumn, Result,
+        WriteBatch,
     },
     blockstore_meta::*,
     entry::{create_ticks, Entry},
