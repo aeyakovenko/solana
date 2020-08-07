@@ -671,7 +671,7 @@ version = "3.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54dedab740bc412d514cfbc4a1d9d5d16fed02c4b14a7be129003c07fdc33b9b"
 dependencies = [
- "nix",
+ "nix 0.17.0",
  "winapi 0.3.8",
 ]
 
@@ -1762,9 +1762,9 @@ checksum = "b294d6fa9ee409a054354afc4352b0b9ef7ca222c69b8812cbea9e7d2bf3783f"
 
 [[package]]
 name = "libc"
-version = "0.2.72"
+version = "0.2.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9f8082297d534141b30c8d39e9b1773713ab50fdbe4ff30f750d063b3bfd701"
+checksum = "a2f02823cf78b754822df5f7f268fb59822e7296276d3e069d8e8cb26a14bd10"
 
 [[package]]
 name = "libloading"
@@ -2026,6 +2026,18 @@ dependencies = [
  "cfg-if",
  "libc",
  "void",
+]
+
+[[package]]
+name = "nix"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83450fe6a6142ddd95fb064b746083fc4ef1705fe81f64a64e1d4b39f54a1055"
+dependencies = [
+ "bitflags",
+ "cc",
+ "cfg-if",
+ "libc",
 ]
 
 [[package]]
@@ -3716,7 +3728,7 @@ dependencies = [
  "dirs",
  "indicatif",
  "lazy_static",
- "nix",
+ "nix 0.18.0",
  "reqwest",
  "semver",
  "serde",
@@ -3945,7 +3957,7 @@ dependencies = [
  "bytes 0.4.12",
  "clap",
  "log 0.4.8",
- "nix",
+ "nix 0.18.0",
  "rand 0.7.3",
  "serde",
  "serde_derive",
@@ -4345,7 +4357,7 @@ version = "1.4.0"
 dependencies = [
  "libc",
  "log 0.4.8",
- "nix",
+ "nix 0.18.0",
  "solana-logger 1.4.0",
  "solana-measure",
  "solana-metrics",
@@ -4361,7 +4373,7 @@ dependencies = [
  "clap",
  "libc",
  "log 0.4.8",
- "nix",
+ "nix 0.18.0",
  "solana-clap-utils",
  "solana-logger 1.4.0",
  "solana-version",
