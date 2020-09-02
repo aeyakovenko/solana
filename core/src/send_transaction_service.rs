@@ -1,7 +1,10 @@
-use crate::{bank::Bank, bank_forks::BankForks};
+use crate::cluster_info::ClusterInfo;
+use crate::poh_recorder::PohRecorder;
 use log::*;
 use solana_metrics::{datapoint_warn, inc_new_counter_info};
-use solana_sdk::{clock::Slot, signature::Signature};
+use solana_runtime::{bank::Bank, bank_forks::BankForks};
+use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
+use std::sync::Mutex;
 use std::{
     collections::HashMap,
     net::{SocketAddr, UdpSocket},
@@ -50,22 +53,39 @@ impl SendTransactionService {
     pub fn new(
         tpu_address: SocketAddr,
         bank_forks: &Arc<RwLock<BankForks>>,
+        cluster_info: &Arc<ClusterInfo>,
+        poh_recorder: Option<Arc<Mutex<PohRecorder>>>,
         exit: &Arc<AtomicBool>,
         receiver: Receiver<TransactionInfo>,
     ) -> Self {
-        let thread = Self::retry_thread(receiver, bank_forks.clone(), tpu_address, exit.clone());
+        let thread = Self::retry_thread(
+            tpu_address,
+            receiver,
+            bank_forks.clone(),
+            cluster_info.clone(),
+            poh_recorder,
+            exit.clone(),
+        );
         Self { thread }
     }
 
     fn retry_thread(
+        tpu_address: SocketAddr,
         receiver: Receiver<TransactionInfo>,
         bank_forks: Arc<RwLock<BankForks>>,
-        tpu_address: SocketAddr,
+        cluster_info: Arc<ClusterInfo>,
+        poh_recorder: Option<Arc<Mutex<PohRecorder>>>,
         exit: Arc<AtomicBool>,
     ) -> JoinHandle<()> {
         let mut last_status_check = Instant::now();
         let mut transactions = HashMap::new();
         let send_socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+
+        let mut recent_peers: HashMap<Pubkey, SocketAddr> = cluster_info
+            .tpu_peers()
+            .into_iter()
+            .map(|ci| (ci.id, ci.tpu))
+            .collect();
 
         Builder::new()
             .name("send-tx-svc".to_string())
@@ -75,9 +95,14 @@ impl SendTransactionService {
                 }
 
                 if let Ok(transaction_info) = receiver.recv_timeout(Duration::from_secs(1)) {
+                    let address = poh_recorder
+                        .as_ref()
+                        .and_then(|recorder| recorder.lock().unwrap().leader_after_n_slots(0))
+                        .and_then(|leader| recent_peers.get(&leader))
+                        .unwrap_or(&tpu_address);
                     Self::send_transaction(
                         &send_socket,
-                        &tpu_address,
+                        address,
                         &transaction_info.wire_transaction,
                     );
                     if transactions.len() < MAX_TRANSACTION_QUEUE_SIZE {
@@ -106,6 +131,11 @@ impl SendTransactionService {
                         );
                     }
                     last_status_check = Instant::now();
+                    recent_peers = cluster_info
+                        .tpu_peers()
+                        .into_iter()
+                        .map(|ci| (ci.id, ci.tpu))
+                        .collect();
                 }
             })
             .unwrap()
