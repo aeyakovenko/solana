@@ -238,7 +238,7 @@ impl JsonRpcService {
         block_commitment_cache: Arc<RwLock<BlockCommitmentCache>>,
         blockstore: Arc<Blockstore>,
         cluster_info: Arc<ClusterInfo>,
-        poh_recorder: Arc<Mutex<PohRecorder>>,
+        poh_recorder: Option<Arc<Mutex<PohRecorder>>>,
         genesis_hash: Hash,
         ledger_path: &Path,
         validator_exit: Arc<RwLock<Option<ValidatorExit>>>,
@@ -292,11 +292,11 @@ impl JsonRpcService {
         );
 
         let exit_send_transaction_service = Arc::new(AtomicBool::new(false));
+        let leader_info = poh_recorder.map(|x| (cluster_info.clone(), x));
         let _send_transaction_service = Arc::new(SendTransactionService::new(
             tpu_address,
             &bank_forks,
-            &cluster_info,
-            Some(poh_recorder),
+            leader_info,
             &exit_send_transaction_service,
             receiver,
         ));
@@ -422,6 +422,7 @@ mod tests {
             block_commitment_cache,
             blockstore,
             cluster_info,
+            None,
             Hash::default(),
             &PathBuf::from("farf"),
             validator_exit,

@@ -1,6 +1,6 @@
-use solana_runtime::{bank::Bank, bank_forks::BankForks};
 use log::*;
 use solana_metrics::{datapoint_warn, inc_new_counter_info};
+use solana_runtime::{bank::Bank, bank_forks::BankForks};
 use solana_sdk::{clock::Slot, signature::Signature};
 use std::{
     collections::HashMap,
@@ -205,7 +205,6 @@ mod test {
 
     #[test]
     fn process_transactions() {
-
         let (genesis_config, mint_keypair) = create_genesis_config(4);
         let bank = Bank::new(&genesis_config);
         let bank_forks = Arc::new(RwLock::new(BankForks::new(bank)));
