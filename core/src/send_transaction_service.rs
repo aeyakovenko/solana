@@ -6,7 +6,7 @@ use solana_runtime::{bank::Bank, bank_forks::BankForks};
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use std::sync::Mutex;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::{SocketAddr, UdpSocket},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -19,6 +19,9 @@ use std::{
 
 /// Maximum size of the transaction queue
 const MAX_TRANSACTION_QUEUE_SIZE: usize = 10_000; // This seems like a lot but maybe it needs to be bigger one day
+
+/// Fan out transactions to the leaders of the next N slots
+const FAN_OUT_LEADER_SLOTS: usize = 10;
 
 pub struct SendTransactionService {
     thread: JoinHandle<()>,
@@ -64,12 +67,22 @@ impl LeaderInfo {
             .collect();
     }
 
-    pub fn get_leader_tpu(&self) -> Option<&SocketAddr> {
-        self.poh_recorder
-            .lock()
-            .unwrap()
-            .leader_after_n_slots(0)
-            .and_then(|leader| self.recent_peers.get(&leader))
+    pub fn get_upcoming_leader_tpus(&self) -> Option<Vec<&SocketAddr>> {
+        let upcoming_leaders: HashSet<Pubkey> = {
+            let poh_recorder = self.poh_recorder.lock().unwrap();
+            (0..FAN_OUT_LEADER_SLOTS)
+                .map(|n| poh_recorder.leader_after_n_slots(n))
+                .collect()
+        };
+        let upcoming_tpus: Vec<&SocketAddr> = upcoming_leaders
+            .into_iter()
+            .filter_map(|leader| self.recent_peers.get(leader))
+            .collect();
+        if !upcoming_tpus.is_empty() {
+            Some(upcoming_tpus)
+        } else {
+            None
+        }
     }
 }
 
@@ -123,13 +136,13 @@ impl SendTransactionService {
                 }
 
                 if let Ok(transaction_info) = receiver.recv_timeout(Duration::from_secs(1)) {
-                    let address = leader_info
+                    let addresses = leader_info
                         .as_ref()
-                        .and_then(|leader_info| leader_info.get_leader_tpu())
-                        .unwrap_or(&tpu_address);
+                        .and_then(|leader_info| leader_info.get_upcoming_leader_tpus())
+                        .unwrap_or_else(|| vec![&tpu_address]);
                     Self::send_transaction(
                         &send_socket,
-                        address,
+                        addresses,
                         &transaction_info.wire_transaction,
                     );
                     if transactions.len() < MAX_TRANSACTION_QUEUE_SIZE {
@@ -200,8 +213,8 @@ impl SendTransactionService {
                             &send_socket,
                             leader_info
                                 .as_ref()
-                                .and_then(|leader_info| leader_info.get_leader_tpu())
-                                .unwrap_or(&tpu_address),
+                                .and_then(|leader_info| leader_info.get_upcoming_leader_tpus())
+                                .unwrap_or_else(|| vec![&tpu_address]),
                             &transaction_info.wire_transaction,
                         );
                         true
@@ -226,12 +239,14 @@ impl SendTransactionService {
 
     fn send_transaction(
         send_socket: &UdpSocket,
-        tpu_address: &SocketAddr,
+        tpu_addresses: Vec<&SocketAddr>,
         wire_transaction: &[u8],
     ) {
-        if let Err(err) = send_socket.send_to(wire_transaction, tpu_address) {
-            warn!("Failed to send transaction to {}: {:?}", tpu_address, err);
-        }
+        tpu_addresses.into_iter().for_each(|tpu_address| {
+            if let Err(err) = send_socket.send_to(wire_transaction, tpu_address) {
+                warn!("Failed to send transaction to {}: {:?}", tpu_address, err);
+            }
+        });
     }
 
     pub fn join(self) -> thread::Result<()> {
