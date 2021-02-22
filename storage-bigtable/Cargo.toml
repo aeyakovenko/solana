@@ -11,7 +11,7 @@ edition = "2018"
 [dependencies]
 backoff = {version="0.2.1", features = ["tokio"]}
 bincode = "1.2.1"
-bzip2 = "0.3.3"
+bzip2 = "0.4.2"
 enum-iterator = "0.6.0"
 flate2 = "1.0.14"
 goauth = "0.7.2"

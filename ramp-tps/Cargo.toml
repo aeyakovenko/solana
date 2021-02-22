@@ -9,7 +9,7 @@ license = "Apache-2.0"
 homepage = "https://solana.com/"
 
 [dependencies]
-bzip2 = "0.3.3"
+bzip2 = "0.4.2"
 clap = "2.33.1"
 log = "0.4.8"
 reqwest = { version = "0.10.8", default-features = false }
