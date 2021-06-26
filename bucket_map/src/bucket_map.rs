@@ -11,7 +11,10 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::RwLock;
+use parking_lot::RwLock;
+use parking_lot::MappedRwLockReadGuard;
+use parking_lot::RwLockReadGuard;
+use parking_lot::*;
 
 pub struct BucketMap<T> {
     buckets: Vec<RwLock<Option<Bucket<T>>>>,
@@ -35,13 +38,11 @@ impl<T: Clone> BucketMap<T> {
             bits: num_buckets_pow2,
         }
     }
-    pub fn read_value(&self, key: &Pubkey) -> Option<Vec<T>> {
+    pub fn read_value<'a>(&'a self, key: &Pubkey) -> MappedRwLockReadGuard<'a, Option<&[T]>> {
         let ix = self.bucket_ix(key);
-        self.buckets[ix].read().unwrap().as_ref().and_then(|x| {
-            let slice = x.read_value(key)?;
-            let mut vec = Vec::with_capacity(slice.len());
-            vec.extend_from_slice(slice);
-            Some(vec)
+        let read_guard: RwLockReadGuard<'a, Option<Bucket<T>>> = self.buckets[ix].read();
+        RwLockReadGuard::map(read_guard, |x: &Option<Bucket<T>>| {
+            &x.and_then(|x| x.read_value(key))
         })
     }
 
