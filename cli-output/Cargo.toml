@@ -12,18 +12,17 @@ documentation = "https://docs.rs/solana-cli-output"
 [dependencies]
 base64 = "0.13.0"
 chrono = { version = "0.4.11", features = ["serde"] }
+clap = "3.0.0-beta"
 console = "0.14.1"
 humantime = "2.0.1"
 Inflector = "0.11.4"
 indicatif = "0.16.2"
-serde = "1.0.126"
-serde_derive = "1.0.103"
-serde_json = "1.0.56"
+serde = "1.0.130"
+serde_json = "1.0.68"
 solana-account-decoder = { path = "../account-decoder", version = "=1.8.0" }
 solana-clap-utils = { path = "../clap-utils", version = "=1.8.0" }
 solana-client = { path = "../client", version = "=1.8.0" }
 solana-sdk = { path = "../sdk", version = "=1.8.0" }
-solana-stake-program = { path = "../programs/stake", version = "=1.8.0" }
 solana-transaction-status = { path = "../transaction-status", version = "=1.8.0" }
 solana-vote-program = { path = "../programs/vote", version = "=1.8.0" }
 spl-memo = { version = "=3.0.1", features = ["no-entrypoint"] }
