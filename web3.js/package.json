@@ -116,7 +116,7 @@
     "eslint-plugin-mocha": "^9.0.0",
     "eslint-plugin-prettier": "^4.0.0",
     "esm": "^3.2.25",
-    "flow-bin": "^0.150.0",
+    "flow-bin": "^0.161.0",
     "flowgen": "^1.13.0",
     "http-server": "^13.0.0",
     "mocha": "^8.2.1",
