@@ -3641,6 +3641,7 @@ dependencies = [
  "crossbeam-channel",
  "log",
  "solana-metrics",
+ "solana-perf",
  "solana-runtime",
  "solana-sdk",
 ]
