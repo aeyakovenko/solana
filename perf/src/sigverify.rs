@@ -517,22 +517,19 @@ pub fn shrink_batches(batches: &mut Vec<PacketBatch>) -> usize {
                 continue;
             }
             last = j;
-            let mut done = false;
-            while i < j && !done {
+            'concentrate_kept: while i < j {
                 while ii < batches[i].packets.len() {
-                    if batches[i].packets[ii].meta.discard() {
-                        batches[i].packets[ii] = batches[j].packets[jj].clone();
+                    let this_ii = ii;
+                    ii = ii.saturating_add(1);
+                    if batches[i].packets[this_ii].meta.discard() {
+                        batches[i].packets[this_ii] = batches[j].packets[jj].clone();
                         batches[j].packets[jj].meta.set_discard(true);
                         last = i;
-                        done = true;
-                        break;
+                        break 'concentrate_kept;
                     }
-                    ii = ii.saturating_add(1);
                 }
-                if ii >= batches[i].packets.len() {
-                    ii = 0;
-                    i = i.saturating_add(1);
-                }
+                ii = 0;
+                i = i.saturating_add(1);
             }
             jj = jj.saturating_add(1);
         }
