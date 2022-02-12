@@ -14,21 +14,25 @@ use {
 
 const NUM_PACKETS: usize = 1024 * 4;
 
-fn test_packet_with_size(size: usize, rng: &mut ThreadRng) -> Vec<u8> {
+fn bench_rng() -> BenchRng {
+    rand::thread_rng()
+}
+
+fn test_packet_with_size<R: Rng>(size: usize, rng: &mut R) -> Vec<u8> {
     // subtract 8 bytes because the length will get serialized as well
     (0..size.checked_sub(8).unwrap())
         .map(|_| rng.gen())
         .collect()
 }
 
-fn do_bench_shrink_packets(bencher: &mut Bencher, mut batches: Vec<PacketBatch>) {
+fn do_bench_shrink_packets<R: Rng>(bencher: &mut Bencher, mut batches: Vec<PacketBatch>, rng: &mut R) {
     // verify packets
     bencher.iter(|| {
         let _ans = sigverify::shrink_batches(&mut batches);
         batches.iter_mut().for_each(|b| {
             b.packets
                 .iter_mut()
-                .for_each(|p| p.meta.set_discard(thread_rng().gen()))
+                .for_each(|p| p.meta.set_discard(rng.gen()))
         });
     });
 }
@@ -36,7 +40,7 @@ fn do_bench_shrink_packets(bencher: &mut Bencher, mut batches: Vec<PacketBatch>)
 #[bench]
 #[ignore]
 fn bench_shrink_diff_small_packets(bencher: &mut Bencher) {
-    let mut rng = rand::thread_rng();
+    let mut rng = bench_rng();
 
     let batches = to_packet_batches(
         &(0..NUM_PACKETS)
@@ -45,13 +49,13 @@ fn bench_shrink_diff_small_packets(bencher: &mut Bencher) {
         PACKETS_PER_BATCH,
     );
 
-    do_bench_shrink_packets(bencher, batches);
+    do_bench_shrink_packets(bencher, batches, &mut rng);
 }
 
 #[bench]
 #[ignore]
 fn bench_shrink_diff_big_packets(bencher: &mut Bencher) {
-    let mut rng = rand::thread_rng();
+    let mut rng = bench_rng();
 
     let batches = to_packet_batches(
         &(0..NUM_PACKETS)
@@ -60,13 +64,13 @@ fn bench_shrink_diff_big_packets(bencher: &mut Bencher) {
         PACKETS_PER_BATCH,
     );
 
-    do_bench_shrink_packets(bencher, batches);
+    do_bench_shrink_packets(bencher, batches, &mut rng);
 }
 
 #[bench]
 #[ignore]
 fn bench_shrink_count_packets(bencher: &mut Bencher) {
-    let mut rng = rand::thread_rng();
+    let mut rng = bench_rng();
 
     let mut batches = to_packet_batches(
         &(0..NUM_PACKETS)
@@ -77,7 +81,7 @@ fn bench_shrink_count_packets(bencher: &mut Bencher) {
     batches.iter_mut().for_each(|b| {
         b.packets
             .iter_mut()
-            .for_each(|p| p.meta.set_discard(thread_rng().gen()))
+            .for_each(|p| p.meta.set_discard(rng.gen()))
     });
 
     bencher.iter(|| {
