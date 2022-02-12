@@ -517,7 +517,7 @@ pub fn shrink_batches(batches: &mut Vec<PacketBatch>) -> usize {
             'concentrate_kept: while i < j {
                 while ii < batches[i].packets.len() {
                     let this_ii = ii;
-                    ii = ii.saturating_add(1);
+                    solana_sdk::saturating_assign_add!(ii, 1);
                     if batches[i].packets[this_ii].meta.discard() {
                         batches[i].packets[this_ii] = batches[j].packets[jj].clone();
                         batches[j].packets[jj].meta.set_discard(true);
@@ -526,7 +526,7 @@ pub fn shrink_batches(batches: &mut Vec<PacketBatch>) -> usize {
                     }
                 }
                 ii = 0;
-                i = i.saturating_add(1);
+                solana_sdk::saturating_assign_add!(i, 1);
             }
         }
     }
