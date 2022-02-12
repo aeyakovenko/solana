@@ -28,7 +28,11 @@ fn test_packet_with_size<R: Rng>(size: usize, rng: &mut R) -> Vec<u8> {
         .collect()
 }
 
-fn do_bench_shrink_packets<R: Rng>(bencher: &mut Bencher, mut batches: Vec<PacketBatch>, rng: &mut R) {
+fn do_bench_shrink_packets<R: Rng>(
+    bencher: &mut Bencher,
+    mut batches: Vec<PacketBatch>,
+    rng: &mut R,
+) {
     // verify packets
     bencher.iter(|| {
         let _ans = sigverify::shrink_batches(&mut batches);
