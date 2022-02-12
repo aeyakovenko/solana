@@ -39,6 +39,7 @@ name = "solana_perf"
 [dev-dependencies]
 matches = "0.1.9"
 solana-logger = { path = "../logger", version = "=1.10.0" }
+rand = { version = "0.7.0", features = ["small_rng"] }
 
 [[bench]]
 name = "sigverify"

@@ -4,7 +4,7 @@
 extern crate test;
 
 use {
-    rand::prelude::*,
+    rand::{prelude::*, rngs::SmallRng as BenchRng},
     solana_perf::{
         packet::{to_packet_batches, PacketBatch, PACKETS_PER_BATCH},
         sigverify,
@@ -15,7 +15,10 @@ use {
 const NUM_PACKETS: usize = 1024 * 4;
 
 fn bench_rng() -> BenchRng {
-    rand::thread_rng()
+    // SmallRng has poor sampling distribution with zero-heavy seeds,
+    // so make one up with around half ones
+    // https://docs.rs/rand/latest/rand/rngs/struct.SmallRng.html
+    BenchRng::seed_from_u64(0xca96_53ca_9653_ca96)
 }
 
 fn test_packet_with_size<R: Rng>(size: usize, rng: &mut R) -> Vec<u8> {
