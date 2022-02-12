@@ -505,28 +505,34 @@ impl Deduper {
 
 //inplace shrink a batch of packets
 pub fn shrink_batches(batches: &mut Vec<PacketBatch>) -> usize {
-    let mut i = 0;
-    let mut ii = 0;
+    let mut keep_batch_index = 0;
+    let mut keep_packet_index = 0;
     let mut last = 0;
-    for j in 1..batches.len() {
-        for jj in 0..batches[j].packets.len() {
-            if batches[j].packets[jj].meta.discard() {
+    for batch_index in 1..batches.len() {
+        for packet_index in 0..batches[batch_index].packets.len() {
+            if batches[batch_index].packets[packet_index].meta.discard() {
                 continue;
             }
-            last = j;
-            'concentrate_kept: while i < j {
-                while ii < batches[i].packets.len() {
-                    let this_ii = ii;
-                    solana_sdk::saturating_assign_add!(ii, 1);
-                    if batches[i].packets[this_ii].meta.discard() {
-                        batches[i].packets[this_ii] = batches[j].packets[jj].clone();
-                        batches[j].packets[jj].meta.set_discard(true);
-                        last = i;
+            last = batch_index;
+            'concentrate_kept: while keep_batch_index < batch_index {
+                while keep_packet_index < batches[keep_batch_index].packets.len() {
+                    let this_keep_packet_index = keep_packet_index;
+                    solana_sdk::saturating_add_assign!(keep_packet_index, 1);
+                    let discard = batches[keep_batch_index].packets[this_keep_packet_index]
+                        .meta
+                        .discard();
+                    if discard {
+                        batches[keep_batch_index].packets[this_keep_packet_index] =
+                            batches[batch_index].packets[packet_index].clone();
+                        batches[batch_index].packets[packet_index]
+                            .meta
+                            .set_discard(true);
+                        last = keep_batch_index;
                         break 'concentrate_kept;
                     }
                 }
-                ii = 0;
-                solana_sdk::saturating_assign_add!(i, 1);
+                keep_packet_index = 0;
+                solana_sdk::saturating_add_assign!(keep_batch_index, 1);
             }
         }
     }
