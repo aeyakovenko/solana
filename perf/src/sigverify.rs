@@ -508,7 +508,7 @@ pub fn shrink_batches(batches: &mut Vec<PacketBatch>) -> usize {
     let mut keep_batch_index = 0;
     let mut keep_packet_index = 0;
     let mut shrunken_length = 0;
-    for batch_index in 1..batches.len() {
+    for batch_index in 0..batches.len() {
         for packet_index in 0..batches[batch_index].packets.len() {
             if batches[batch_index].packets[packet_index].meta.discard() {
                 continue;
