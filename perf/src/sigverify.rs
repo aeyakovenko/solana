@@ -507,13 +507,10 @@ impl Deduper {
 pub fn shrink_batches(batches: &mut Vec<PacketBatch>) -> usize {
     let mut i = 0;
     let mut ii = 0;
-    let mut j = 1;
-    let mut jj = 0;
     let mut last = 0;
-    while j < batches.len() {
-        while jj < batches[j].packets.len() {
+    for j in 1..batches.len() {
+        for jj in 0..batches[j].packets.len() {
             if batches[j].packets[jj].meta.discard() {
-                jj = jj.saturating_add(1);
                 continue;
             }
             last = j;
@@ -531,10 +528,7 @@ pub fn shrink_batches(batches: &mut Vec<PacketBatch>) -> usize {
                 ii = 0;
                 i = i.saturating_add(1);
             }
-            jj = jj.saturating_add(1);
         }
-        jj = 0;
-        j = j.saturating_add(1);
     }
     last.saturating_add(1)
 }
