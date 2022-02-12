@@ -507,13 +507,12 @@ impl Deduper {
 pub fn shrink_batches(batches: &mut Vec<PacketBatch>) -> usize {
     let mut keep_batch_index = 0;
     let mut keep_packet_index = 0;
-    let mut last = 0;
+    let mut shrunken_length = 0;
     for batch_index in 1..batches.len() {
         for packet_index in 0..batches[batch_index].packets.len() {
             if batches[batch_index].packets[packet_index].meta.discard() {
                 continue;
             }
-            last = batch_index;
             'concentrate_kept: while keep_batch_index < batch_index {
                 while keep_packet_index < batches[keep_batch_index].packets.len() {
                     let this_keep_packet_index = keep_packet_index;
@@ -527,16 +526,17 @@ pub fn shrink_batches(batches: &mut Vec<PacketBatch>) -> usize {
                         batches[batch_index].packets[packet_index]
                             .meta
                             .set_discard(true);
-                        last = keep_batch_index;
                         break 'concentrate_kept;
                     }
                 }
                 keep_packet_index = 0;
                 solana_sdk::saturating_add_assign!(keep_batch_index, 1);
             }
+            shrunken_length = keep_batch_index.saturating_add(1);
         }
     }
-    last.saturating_add(1)
+
+    shrunken_length
 }
 
 pub fn ed25519_verify_cpu(batches: &mut [PacketBatch], reject_non_vote: bool, packet_count: usize) {
@@ -1478,7 +1478,7 @@ mod tests {
     }
 
     #[test]
-    fn test_shrink() {
+    fn test_shrink_fuzz() {
         for _ in 0..10 {
             let mut batches = to_packet_batches(
                 &(0..1024).map(|_| test_tx()).collect::<Vec<_>>(),
@@ -1495,5 +1495,21 @@ mod tests {
             let packet_count2 = count_valid_packets(&batches);
             assert_eq!(packet_count, packet_count2);
         }
+    }
+
+    #[test]
+    fn test_shrink_empty() {
+        const PACKET_COUNT: usize = 1024;
+        const BATCH_COUNT: usize = PACKET_COUNT / PACKETS_PER_BATCH;
+
+        // No batches
+        assert_eq!(shrink_batches(&mut vec![]), 0);
+        // One empty batch
+        assert_eq!(shrink_batches(&mut vec![PacketBatch::with_capacity(0)]), 0);
+        // Many empty batches
+        let mut batches = (0..BATCH_COUNT)
+            .map(|_| PacketBatch::with_capacity(0))
+            .collect::<Vec<_>>();
+        assert_eq!(shrink_batches(&mut batches), 0);
     }
 }
