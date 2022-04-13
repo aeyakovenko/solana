@@ -3529,9 +3529,9 @@ flatted@^3.1.0:
   version "3.2.5"
   resolved "https://registry.npmjs.org/flatted/-/flatted-3.2.5.tgz"
 
-flow-bin@^0.150.0:
-  version "0.150.1"
-  resolved "https://registry.npmjs.org/flow-bin/-/flow-bin-0.150.1.tgz"
+flow-bin@^0.176.0:
+  version "0.176.0"
+  resolved "https://registry.yarnpkg.com/flow-bin/-/flow-bin-0.176.0.tgz#581419d683474dafa0c837c10d030665695ad1f8"
 
 flowgen@^1.13.0:
   version "1.17.0"
