@@ -1932,9 +1932,22 @@ impl BankingStage {
                 transactions.len(),
                 chunk_start + MAX_NUM_TRANSACTIONS_PER_BATCH,
             );
+            let mut txs: Vec<&SanitizedTransaction> = vec![];
+            let mut w_accounts: HashSet<Pubkey> = HashSet::new();
+            for (i,t) in transactions.iter().enumerate() {
+                if t.writable_accounts().map(|w| w_accounts.exists(w)).any() {
+                    continue;
+                }
+                t.writable_accounts().for_each(|w| w_accounts.push(w));
+                txs.push(t);
+                if txs.len() == MAX_NUM_TRANSACTIONS_PER_BATCH {
+                    break;
+                }
+                chunk_end = i;
+            }
             let process_transaction_batch_output = Self::process_and_record_transactions(
                 bank,
-                &transactions[chunk_start..chunk_end],
+                &txs,
                 poh,
                 chunk_start,
                 transaction_status_sender.clone(),
