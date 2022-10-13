@@ -1928,10 +1928,7 @@ impl BankingStage {
         let mut total_error_counters = TransactionErrorMetrics::default();
         let mut reached_max_poh_height = false;
         while chunk_start != transactions.len() {
-            let chunk_end = std::cmp::min(
-                transactions.len(),
-                chunk_start + MAX_NUM_TRANSACTIONS_PER_BATCH,
-            );
+            let mut chunk_end = chunk_start;
             let mut txs: Vec<&SanitizedTransaction> = vec![];
             let mut w_accounts: HashSet<Pubkey> = HashSet::new();
             for (i,t) in transactions.iter().enumerate() {
