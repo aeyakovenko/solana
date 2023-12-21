@@ -387,7 +387,7 @@ fn prune_unstaked_connections_and_add_new_connection(
     wait_for_chunk_timeout: Duration,
 ) -> Result<(), ConnectionHandlerError> {
     let stats = params.stats.clone();
-    if max_connections > 0 {
+    if  max_connections > 0 {
         let connection_table_clone = connection_table.clone();
         let mut connection_table = connection_table.lock().unwrap();
         prune_unstaked_connection_table(&mut connection_table, max_connections, stats);
@@ -956,10 +956,17 @@ impl ConnectionTableKey {
 }
 
 // Map of IP to list of connection entries
+//10 ema samples
+const EMA_WINDOW = 10;
+const RATE_WINDOW_MS = 10;
+const MAX_CONNECTIONS_10_MS = 1_000;
 struct ConnectionTable {
     table: IndexMap<ConnectionTableKey, Vec<ConnectionEntry>>,
     total_size: usize,
     peer_type: ConnectionPeerType,
+    num_inserts: u64,
+    time: u128,
+    ema_inserts: f64,
 }
 
 // Prune the connection which has the oldest update
@@ -1027,12 +1034,14 @@ impl ConnectionTable {
         max_connections_per_peer: usize,
     ) -> Option<(Arc<AtomicU64>, Arc<AtomicBool>)> {
         let connection_entry = self.table.entry(key).or_insert_with(Vec::new);
+        self.compute_insert_ema_rate();
         let has_connection_capacity = connection_entry
             .len()
             .checked_add(1)
             .map(|c| c <= max_connections_per_peer)
             .unwrap_or(false);
-        if has_connection_capacity {
+
+        if has_connection_capacity && self.ema_inserts < MAX_CONNECTIONS_10_MS {
             let exit = Arc::new(AtomicBool::new(false));
             let last_update = Arc::new(AtomicU64::new(last_update));
             connection_entry.push(ConnectionEntry::new(
@@ -1053,6 +1062,16 @@ impl ConnectionTable {
             }
             None
         }
+    }
+
+    fn compute_insert_ema_rate() {
+            self.num_inserts += 1;
+            let now = Instant::now().as_millis();
+            if now - self.time > RATE_WINDOW_MS  {
+                self.ema = self.num_inserts * 2.0/(1.0+EMA_WINDOW) + self.ema * (1-2.0/(1.0 + EMA_WINDOW))
+                self.time = now
+                self.num_inserts = 0;
+            }
     }
 
     // Returns number of connections that were removed
