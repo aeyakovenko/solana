@@ -390,6 +390,14 @@ fn prune_unstaked_connections_and_add_new_connection(
     if max_connections > 0 {
         let connection_table_clone = connection_table.clone();
         let mut connection_table = connection_table.lock().unwrap();
+        connection_table.compute_insert_ema_rate();
+        if connection_table.ema_inserts < MAX_CONNECTIONS_10_MS.into() {
+            connection.close(
+                CONNECTION_CLOSE_CODE_TOO_MANY.into(),
+                CONNECTION_CLOSE_REASON_TOO_MANY,
+            );
+            return Err(ConnectionHandlerError::ConnectionAddError);
+        }
         prune_unstaked_connection_table(&mut connection_table, max_connections, stats);
         handle_and_cache_new_connection(
             connection,
@@ -1036,15 +1044,13 @@ impl ConnectionTable {
         last_update: u64,
         max_connections_per_peer: usize,
     ) -> Option<(Arc<AtomicU64>, Arc<AtomicBool>)> {
-        self.compute_insert_ema_rate();
         let connection_entry = self.table.entry(key).or_insert_with(Vec::new);
         let has_connection_capacity = connection_entry
             .len()
             .checked_add(1)
             .map(|c| c <= max_connections_per_peer)
             .unwrap_or(false);
-
-        if has_connection_capacity && self.ema_inserts < MAX_CONNECTIONS_10_MS.into() {
+        if has_connection_capacity {
             let exit = Arc::new(AtomicBool::new(false));
             let last_update = Arc::new(AtomicU64::new(last_update));
             connection_entry.push(ConnectionEntry::new(
