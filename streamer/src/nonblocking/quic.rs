@@ -387,7 +387,7 @@ fn prune_unstaked_connections_and_add_new_connection(
     wait_for_chunk_timeout: Duration,
 ) -> Result<(), ConnectionHandlerError> {
     let stats = params.stats.clone();
-    if  max_connections > 0 {
+    if max_connections > 0 {
         let connection_table_clone = connection_table.clone();
         let mut connection_table = connection_table.lock().unwrap();
         prune_unstaked_connection_table(&mut connection_table, max_connections, stats);
@@ -955,11 +955,11 @@ impl ConnectionTableKey {
     }
 }
 
+//10 connections max in 10ms * 128 streams per connection ~= 120kpps
+const EMA_WINDOW: f64 = 10.0;
+const RATE_WINDOW_MS: u128 = 10;
+const MAX_CONNECTIONS_10_MS: u32 = 10;
 // Map of IP to list of connection entries
-//10 ema samples
-const EMA_WINDOW = 10;
-const RATE_WINDOW_MS = 10;
-const MAX_CONNECTIONS_10_MS = 1_000;
 struct ConnectionTable {
     table: IndexMap<ConnectionTableKey, Vec<ConnectionEntry>>,
     total_size: usize,
@@ -977,6 +977,9 @@ impl ConnectionTable {
             table: IndexMap::default(),
             total_size: 0,
             peer_type,
+            num_inserts: 0,
+            time: 0,
+            ema_inserts: 0f64,
         }
     }
 
@@ -1033,15 +1036,15 @@ impl ConnectionTable {
         last_update: u64,
         max_connections_per_peer: usize,
     ) -> Option<(Arc<AtomicU64>, Arc<AtomicBool>)> {
-        let connection_entry = self.table.entry(key).or_insert_with(Vec::new);
         self.compute_insert_ema_rate();
+        let connection_entry = self.table.entry(key).or_insert_with(Vec::new);
         let has_connection_capacity = connection_entry
             .len()
             .checked_add(1)
             .map(|c| c <= max_connections_per_peer)
             .unwrap_or(false);
 
-        if has_connection_capacity && self.ema_inserts < MAX_CONNECTIONS_10_MS {
+        if has_connection_capacity && self.ema_inserts < MAX_CONNECTIONS_10_MS.into() {
             let exit = Arc::new(AtomicBool::new(false));
             let last_update = Arc::new(AtomicU64::new(last_update));
             connection_entry.push(ConnectionEntry::new(
@@ -1064,14 +1067,18 @@ impl ConnectionTable {
         }
     }
 
-    fn compute_insert_ema_rate() {
-            self.num_inserts += 1;
-            let now = Instant::now().as_millis();
-            if now - self.time > RATE_WINDOW_MS  {
-                self.ema = self.num_inserts * 2.0/(1.0+EMA_WINDOW) + self.ema * (1-2.0/(1.0 + EMA_WINDOW))
-                self.time = now
-                self.num_inserts = 0;
+    fn compute_insert_ema_rate(&mut self) {
+        self.num_inserts += 1;
+        let now = Instant::now().elapsed().as_millis();
+        if now > self.time && now - self.time > RATE_WINDOW_MS {
+            self.ema_inserts = (self.num_inserts as f64) * 2.0 / (1.0 + EMA_WINDOW)
+                + self.ema_inserts * (1.0 - 2.0 / (1.0 + EMA_WINDOW));
+            if !self.ema_inserts.is_normal() {
+                self.ema_inserts = 0.0;
             }
+            self.time = now;
+            self.num_inserts = 0;
+        }
     }
 
     // Returns number of connections that were removed
