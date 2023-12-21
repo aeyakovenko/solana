@@ -963,10 +963,10 @@ impl ConnectionTableKey {
     }
 }
 
-//10 connections max in 10ms * 128 streams per connection ~= 120kpps
+//64 connections max in 10ms * 16 streams per connection ~= 100kpps
 const EMA_WINDOW: f64 = 10.0;
 const RATE_WINDOW_MS: u128 = 10;
-const MAX_CONNECTIONS_10_MS: u32 = 10;
+const MAX_CONNECTIONS_10_MS: u32 = 64;
 // Map of IP to list of connection entries
 struct ConnectionTable {
     table: IndexMap<ConnectionTableKey, Vec<ConnectionEntry>>,
