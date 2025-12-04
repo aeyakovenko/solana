@@ -192,7 +192,7 @@ futures = "0.3.28"
 futures-util = "0.3.28"
 gag = "1.0.0"
 generic-array = { version = "0.14.7", default-features = false }
-gethostname = "0.2.3"
+gethostname = "0.4.3"
 getrandom = "0.1.14"
 goauth = "0.13.1"
 hex = "0.4.3"
