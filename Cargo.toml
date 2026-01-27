@@ -243,7 +243,7 @@ openssl = "0.10"
 ouroboros = "0.15.6"
 parking_lot = "0.12"
 pbkdf2 = { version = "0.11.0", default-features = false }
-pem = "1.1.1"
+pem = "3.0.5"
 percentage = "0.1.0"
 pickledb = { version = "0.5.1", default-features = false }
 pkcs8 = "0.8.0"
