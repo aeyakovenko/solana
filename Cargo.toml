@@ -287,7 +287,7 @@ sha3 = "0.10.4"
 signal-hook = "0.3.15"
 smpl_jwt = "0.7.1"
 socket2 = "0.4.9"
-soketto = "0.7"
+soketto = "0.8"
 solana_rbpf = "=0.5.0"
 solana-account-decoder = { path = "account-decoder", version = "=1.17.0" }
 solana-address-lookup-table-program = { path = "programs/address-lookup-table", version = "=1.17.0" }
