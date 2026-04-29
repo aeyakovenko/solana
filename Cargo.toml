@@ -197,7 +197,7 @@ getrandom = "0.1.14"
 goauth = "0.13.1"
 hex = "0.4.3"
 hidapi = { version = "2.3.3", default-features = false }
-histogram = "0.6.9"
+histogram = "0.7.4"
 hmac = "0.12.1"
 http = "0.2.9"
 humantime = "2.0.1"
