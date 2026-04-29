@@ -1617,10 +1617,22 @@ version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f86b50932a01e7ec5c06160492ab660fb19b6bb2a7878030dd6cd68d21df9d4d"
 dependencies = [
- "enum-ordinalize",
+ "enum-ordinalize 3.1.10",
  "proc-macro2 1.0.59",
  "quote 1.0.28",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "educe"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4bd92664bf78c4d3dba9b7cdafce6fa15b13ed3ed16175218196942e99168a8"
+dependencies = [
+ "enum-ordinalize 4.3.2",
+ "proc-macro2 1.0.59",
+ "quote 1.0.28",
+ "syn 2.0.18",
 ]
 
 [[package]]
@@ -1675,6 +1687,26 @@ dependencies = [
  "proc-macro2 1.0.59",
  "quote 1.0.28",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "enum-ordinalize"
+version = "4.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a1091a7bb1f8f2c4b28f1fe2cef4980ca2d410a3d727d67ecc3178c9b0800f0"
+dependencies = [
+ "enum-ordinalize-derive",
+]
+
+[[package]]
+name = "enum-ordinalize-derive"
+version = "4.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ca9601fb2d62598ee17836250842873a413586e5d7ed88b356e38ddbb0ec631"
+dependencies = [
+ "proc-macro2 1.0.59",
+ "quote 1.0.28",
+ "syn 2.0.18",
 ]
 
 [[package]]
@@ -5034,7 +5066,7 @@ dependencies = [
  "tarpc",
  "thiserror",
  "tokio",
- "tokio-serde",
+ "tokio-serde 0.9.0",
 ]
 
 [[package]]
@@ -5060,7 +5092,7 @@ dependencies = [
  "solana-send-transaction-service",
  "tarpc",
  "tokio",
- "tokio-serde",
+ "tokio-serde 0.9.0",
 ]
 
 [[package]]
@@ -7463,7 +7495,7 @@ dependencies = [
  "tarpc-plugins",
  "thiserror",
  "tokio",
- "tokio-serde",
+ "tokio-serde 0.8.0",
  "tokio-util 0.6.9",
  "tracing",
  "tracing-opentelemetry",
@@ -7745,12 +7777,27 @@ checksum = "911a61637386b789af998ee23f50aa30d5fd7edcec8d6d3dedae5e5815205466"
 dependencies = [
  "bincode",
  "bytes",
- "educe",
+ "educe 0.4.18",
  "futures-core",
  "futures-sink",
  "pin-project",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "tokio-serde"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caf600e7036b17782571dd44fa0a5cea3c82f60db5137f774a325a76a0d6852b"
+dependencies = [
+ "bincode",
+ "bytes",
+ "educe 0.5.11",
+ "futures-core",
+ "futures-sink",
+ "pin-project",
+ "serde",
 ]
 
 [[package]]
