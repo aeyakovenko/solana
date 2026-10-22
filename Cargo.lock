@@ -132,15 +132,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ansi_term"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee49baf6cb617b853aa8d93bf420db2383fab46d314482ca2803b40d5fde979b"
-dependencies = [
- "winapi 0.3.9",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1011,21 +1002,6 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "2.33.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37e58ac78573c40708d45522f0d80fa2f01cc4f9b4e2bf749807255454312002"
-dependencies = [
- "ansi_term",
- "atty",
- "bitflags",
- "strsim 0.8.0",
- "textwrap 0.11.0",
- "unicode-width",
- "vec_map",
-]
-
-[[package]]
-name = "clap"
 version = "3.2.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71655c45cb9845d3270c9d6df84ebe72b4dad3c2ba3f7023ad47c144e4e473a5"
@@ -1036,9 +1012,9 @@ dependencies = [
  "clap_lex",
  "indexmap",
  "once_cell",
- "strsim 0.10.0",
+ "strsim",
  "termcolor",
- "textwrap 0.16.0",
+ "textwrap",
 ]
 
 [[package]]
@@ -1357,7 +1333,7 @@ dependencies = [
  "ident_case",
  "proc-macro2 1.0.59",
  "quote 1.0.28",
- "strsim 0.10.0",
+ "strsim",
  "syn 2.0.18",
 ]
 
@@ -4927,7 +4903,7 @@ dependencies = [
 name = "solana-accounts-bench"
 version = "1.17.0"
 dependencies = [
- "clap 2.33.3",
+ "clap",
  "log",
  "rayon",
  "solana-logger",
@@ -4941,7 +4917,7 @@ dependencies = [
 name = "solana-accounts-cluster-bench"
 version = "1.17.0"
 dependencies = [
- "clap 2.33.3",
+ "clap",
  "log",
  "rand 0.7.3",
  "rayon",
@@ -5000,7 +4976,7 @@ dependencies = [
 name = "solana-banking-bench"
 version = "1.17.0"
 dependencies = [
- "clap 3.2.23",
+ "clap",
  "crossbeam-channel",
  "log",
  "rand 0.7.3",
@@ -5067,7 +5043,7 @@ dependencies = [
 name = "solana-bench-streamer"
 version = "1.17.0"
 dependencies = [
- "clap 3.2.23",
+ "clap",
  "crossbeam-channel",
  "solana-net-utils",
  "solana-streamer",
@@ -5078,7 +5054,7 @@ dependencies = [
 name = "solana-bench-tps"
 version = "1.17.0"
 dependencies = [
- "clap 2.33.3",
+ "clap",
  "crossbeam-channel",
  "log",
  "rand 0.7.3",
@@ -5184,7 +5160,7 @@ name = "solana-cargo-build-bpf"
 version = "1.17.0"
 dependencies = [
  "cargo_metadata",
- "clap 3.2.23",
+ "clap",
  "log",
  "solana-logger",
  "solana-sdk",
@@ -5197,7 +5173,7 @@ dependencies = [
  "assert_cmd",
  "bzip2",
  "cargo_metadata",
- "clap 3.2.23",
+ "clap",
  "log",
  "predicates",
  "regex",
@@ -5215,7 +5191,7 @@ name = "solana-cargo-test-bpf"
 version = "1.17.0"
 dependencies = [
  "cargo_metadata",
- "clap 3.2.23",
+ "clap",
 ]
 
 [[package]]
@@ -5223,7 +5199,7 @@ name = "solana-cargo-test-sbf"
 version = "1.17.0"
 dependencies = [
  "cargo_metadata",
- "clap 3.2.23",
+ "clap",
  "log",
  "solana-logger",
 ]
@@ -5233,7 +5209,7 @@ name = "solana-clap-utils"
 version = "1.17.0"
 dependencies = [
  "chrono",
- "clap 2.33.3",
+ "clap",
  "rpassword",
  "solana-perf",
  "solana-remote-wallet",
@@ -5250,7 +5226,7 @@ name = "solana-clap-v3-utils"
 version = "1.17.0"
 dependencies = [
  "chrono",
- "clap 3.2.23",
+ "clap",
  "rpassword",
  "solana-perf",
  "solana-remote-wallet",
@@ -5269,7 +5245,7 @@ version = "1.17.0"
 dependencies = [
  "bincode",
  "bs58",
- "clap 2.33.3",
+ "clap",
  "console",
  "const_format",
  "criterion-stats",
@@ -5337,7 +5313,7 @@ dependencies = [
  "Inflector",
  "base64 0.21.2",
  "chrono",
- "clap 2.33.3",
+ "clap",
  "console",
  "ed25519-dalek",
  "humantime",
@@ -5538,7 +5514,7 @@ name = "solana-dos"
 version = "1.17.0"
 dependencies = [
  "bincode",
- "clap 3.2.23",
+ "clap",
  "crossbeam-channel",
  "itertools",
  "log",
@@ -5615,7 +5591,7 @@ version = "1.17.0"
 dependencies = [
  "bincode",
  "byteorder",
- "clap 2.33.3",
+ "clap",
  "crossbeam-channel",
  "log",
  "serde",
@@ -5679,7 +5655,7 @@ version = "1.17.0"
 dependencies = [
  "base64 0.21.2",
  "bincode",
- "clap 2.33.3",
+ "clap",
  "itertools",
  "serde",
  "serde_json",
@@ -5748,7 +5724,7 @@ version = "1.17.0"
 dependencies = [
  "bincode",
  "bv",
- "clap 2.33.3",
+ "clap",
  "crossbeam-channel",
  "flate2",
  "indexmap",
@@ -5799,7 +5775,7 @@ dependencies = [
  "bincode",
  "bzip2",
  "chrono",
- "clap 2.33.3",
+ "clap",
  "console",
  "crossbeam-channel",
  "ctrlc",
@@ -5831,7 +5807,7 @@ name = "solana-keygen"
 version = "1.17.0"
 dependencies = [
  "bs58",
- "clap 3.2.23",
+ "clap",
  "dirs-next",
  "num_cpus",
  "solana-clap-v3-utils",
@@ -5914,7 +5890,7 @@ dependencies = [
  "bs58",
  "bytecount",
  "chrono",
- "clap 2.33.3",
+ "clap",
  "crossbeam-channel",
  "csv",
  "dashmap 4.0.2",
@@ -6006,7 +5982,7 @@ name = "solana-log-analyzer"
 version = "1.17.0"
 dependencies = [
  "byte-unit",
- "clap 3.2.23",
+ "clap",
  "serde",
  "serde_json",
  "solana-logger",
@@ -6038,7 +6014,7 @@ version = "1.17.0"
 name = "solana-merkle-root-bench"
 version = "1.17.0"
 dependencies = [
- "clap 2.33.3",
+ "clap",
  "log",
  "solana-logger",
  "solana-measure",
@@ -6076,7 +6052,7 @@ dependencies = [
 name = "solana-net-shaper"
 version = "1.17.0"
 dependencies = [
- "clap 3.2.23",
+ "clap",
  "rand 0.7.3",
  "serde",
  "serde_json",
@@ -6088,7 +6064,7 @@ name = "solana-net-utils"
 version = "1.17.0"
 dependencies = [
  "bincode",
- "clap 3.2.23",
+ "clap",
  "crossbeam-channel",
  "log",
  "nix",
@@ -6167,7 +6143,7 @@ dependencies = [
 name = "solana-poh-bench"
 version = "1.17.0"
 dependencies = [
- "clap 3.2.23",
+ "clap",
  "log",
  "rand 0.7.3",
  "rayon",
@@ -6478,7 +6454,7 @@ name = "solana-rpc-client-nonce-utils"
 version = "1.17.0"
 dependencies = [
  "anyhow",
- "clap 2.33.3",
+ "clap",
  "futures 0.3.28",
  "serde_json",
  "solana-account-decoder",
@@ -6677,7 +6653,7 @@ dependencies = [
 name = "solana-stake-accounts"
 version = "1.17.0"
 dependencies = [
- "clap 2.33.3",
+ "clap",
  "solana-clap-utils",
  "solana-cli-config",
  "solana-remote-wallet",
@@ -6758,7 +6734,7 @@ dependencies = [
 name = "solana-store-tool"
 version = "1.17.0"
 dependencies = [
- "clap 2.33.3",
+ "clap",
  "log",
  "solana-logger",
  "solana-runtime",
@@ -6861,7 +6837,7 @@ version = "1.17.0"
 dependencies = [
  "bincode",
  "chrono",
- "clap 2.33.3",
+ "clap",
  "console",
  "csv",
  "ctrlc",
@@ -6916,7 +6892,7 @@ name = "solana-transaction-dos"
 version = "1.17.0"
 dependencies = [
  "bincode",
- "clap 2.33.3",
+ "clap",
  "log",
  "rand 0.7.3",
  "rayon",
@@ -6988,7 +6964,7 @@ name = "solana-validator"
 version = "1.17.0"
 dependencies = [
  "chrono",
- "clap 2.33.3",
+ "clap",
  "console",
  "core_affinity",
  "crossbeam-channel",
@@ -7086,7 +7062,7 @@ dependencies = [
 name = "solana-watchtower"
 version = "1.17.0"
 dependencies = [
- "clap 2.33.3",
+ "clap",
  "humantime",
  "log",
  "solana-clap-utils",
@@ -7106,7 +7082,7 @@ name = "solana-zk-keygen"
 version = "1.17.0"
 dependencies = [
  "bs58",
- "clap 3.2.23",
+ "clap",
  "dirs-next",
  "num_cpus",
  "solana-clap-v3-utils",
@@ -7299,12 +7275,6 @@ dependencies = [
  "pin-project",
  "tokio",
 ]
-
-[[package]]
-name = "strsim"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ea5119cdb4c55b55d432abb513a0429384878c15dde60cc77b1c99de1a95a6a"
 
 [[package]]
 name = "strsim"
@@ -7529,15 +7499,6 @@ dependencies = [
  "proc-macro2 1.0.59",
  "quote 1.0.28",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "textwrap"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d326610f408c7a4eb6f51c37c330e496b08506c9457c9d34287ecc38809fb060"
-dependencies = [
- "unicode-width",
 ]
 
 [[package]]
@@ -8213,12 +8174,6 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
-
-[[package]]
-name = "vec_map"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
 
 [[package]]
 name = "version_check"
