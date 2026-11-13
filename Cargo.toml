@@ -194,7 +194,7 @@ gag = "1.0.0"
 generic-array = { version = "0.14.7", default-features = false }
 gethostname = "0.2.3"
 getrandom = "0.1.14"
-goauth = "0.13.1"
+goauth = "0.17.0"
 hex = "0.4.3"
 hidapi = { version = "2.3.3", default-features = false }
 histogram = "0.6.9"
